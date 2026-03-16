@@ -1,12 +1,14 @@
 {
-  "name": "Portfolio Tracker",
-  "short_name": "Portfolio",
-  "description": "Track stocks and MFs with 1W/1M/3M/1Y performance",
-  "start_url": "/ClaudeCode-Experiment/",
+  "name": "StockPulse — Portfolio Tracker",
+  "short_name": "StockPulse",
+  "description": "Track NSE/BSE/US stocks with 1W, 1M, 3M, 1Y performance percentages. No login. No install.",
+  "start_url": "/StockPulse/",
+  "scope": "/StockPulse/",
   "display": "standalone",
   "background_color": "#0f1117",
   "theme_color": "#6366f1",
   "orientation": "portrait-primary",
+  "categories": ["finance", "utilities"],
   "icons": [
     {
       "src": "icon-192.png",

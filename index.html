@@ -6,10 +6,11 @@
   <meta name="theme-color" content="#6366f1" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="Portfolio" />
+  <meta name="apple-mobile-web-app-title" content="StockPulse" />
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <title>Portfolio Tracker</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <title>StockPulse — Portfolio Tracker</title>
   <style>
     :root {
       --bg: #0f1117; --bg2: #1a1d27; --bg3: #242736;
@@ -168,7 +169,7 @@
 
   <!-- Top bar -->
   <div class="topbar">
-    <div class="topbar-title">📊 Portfolio</div>
+    <div class="topbar-title"><span style="color:#818cf8">⚡</span> StockPulse</div>
     <span class="last-update" id="lastUpdate"></span>
     <button class="icon-btn" id="refreshBtn" onclick="refreshAll()">↻ Refresh</button>
   </div>
@@ -477,7 +478,7 @@ function renderPortfolio() {
 
   if (portfolio.length === 0) {
     list.innerHTML = `<div class="empty-state">
-      <div class="icon">📈</div>
+      <div class="icon">⚡</div>
       <p>No holdings yet</p>
       <small>Tap + to add your first stock</small>
     </div>`;
