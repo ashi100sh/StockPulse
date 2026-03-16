@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portfolio Performance Tracker</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1>📊 Portfolio Tracker</h1>
+        <span class="subtitle">NSE · BSE · US Stocks · Crypto</span>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-secondary" id="importBtn">⬆ Import CSV</button>
+        <input type="file" id="csvFileInput" accept=".csv" style="display:none" />
+        <a class="btn btn-secondary" href="/api/export/csv">⬇ Export CSV</a>
+        <button class="btn btn-primary" id="refreshBtn">🔄 Refresh</button>
+      </div>
+    </header>
+
+    <!-- Summary Cards -->
+    <section class="summary-cards" id="summaryCards">
+      <div class="card summary-card">
+        <div class="card-label">Total Invested</div>
+        <div class="card-value" id="totalInvested">—</div>
+      </div>
+      <div class="card summary-card">
+        <div class="card-label">Current Value</div>
+        <div class="card-value" id="totalCurrent">—</div>
+      </div>
+      <div class="card summary-card">
+        <div class="card-label">Total P&amp;L</div>
+        <div class="card-value" id="totalPL">—</div>
+      </div>
+      <div class="card summary-card">
+        <div class="card-label">Overall Return</div>
+        <div class="card-value" id="totalPLPct">—</div>
+      </div>
+    </section>
+
+    <!-- Add Holding Form -->
+    <section class="card add-form">
+      <h2>Add Holding</h2>
+      <form id="addHoldingForm">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Symbol</label>
+            <input type="text" id="fSymbol" placeholder="e.g. RELIANCE, INFY" required />
+          </div>
+          <div class="form-group">
+            <label>Exchange</label>
+            <select id="fExchange">
+              <option value="NSE">NSE (India)</option>
+              <option value="BSE">BSE (India)</option>
+              <option value="US">US Market</option>
+              <option value="MF">Mutual Fund</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Asset Type</label>
+            <select id="fAssetType">
+              <option value="stock">Stock</option>
+              <option value="etf">ETF</option>
+              <option value="mf">Mutual Fund</option>
+              <option value="crypto">Crypto</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Buy Price (₹)</label>
+            <input type="number" id="fBuyPrice" placeholder="0.00" step="0.01" min="0" required />
+          </div>
+          <div class="form-group">
+            <label>Quantity</label>
+            <input type="number" id="fQuantity" placeholder="1" step="0.001" min="0" required />
+          </div>
+          <div class="form-group">
+            <label>Buy Date</label>
+            <input type="date" id="fBuyDate" />
+          </div>
+          <div class="form-group form-group-action">
+            <button type="submit" class="btn btn-primary">+ Add</button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- Loading Spinner -->
+    <div id="loadingBar" class="loading-bar" style="display:none">
+      <div class="spinner"></div>
+      <span>Fetching live market data…</span>
+    </div>
+
+    <!-- Holdings Table -->
+    <section class="card table-section">
+      <div class="table-header">
+        <h2>Holdings</h2>
+        <div class="filter-row">
+          <input type="text" id="searchInput" placeholder="Search symbol or name…" class="search-input" />
+          <select id="filterExchange" class="filter-select">
+            <option value="">All Exchanges</option>
+            <option value="NSE">NSE</option>
+            <option value="BSE">BSE</option>
+            <option value="US">US</option>
+            <option value="MF">MF</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-wrapper">
+        <table id="holdingsTable">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Name</th>
+              <th>Exch</th>
+              <th>Qty</th>
+              <th>Buy Price</th>
+              <th>Curr Price</th>
+              <th>Invested</th>
+              <th>Curr Value</th>
+              <th>P&amp;L</th>
+              <th>P&amp;L %</th>
+              <th class="perf-col">1W %</th>
+              <th class="perf-col">1M %</th>
+              <th class="perf-col">3M %</th>
+              <th class="perf-col">1Y %</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="holdingsBody">
+            <tr class="empty-row">
+              <td colspan="15">No holdings yet. Add your first stock above.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Performance Heatmap -->
+    <section class="card heatmap-section" id="heatmapSection" style="display:none">
+      <h2>Performance Heatmap</h2>
+      <div class="heatmap-legend">
+        <span class="legend-item loss-dark">< -10%</span>
+        <span class="legend-item loss">-10% to 0%</span>
+        <span class="legend-item neutral">0%</span>
+        <span class="legend-item gain">0% to 10%</span>
+        <span class="legend-item gain-dark">> 10%</span>
+      </div>
+      <div class="heatmap-tabs">
+        <button class="tab-btn active" data-period="pct_1w">1 Week</button>
+        <button class="tab-btn" data-period="pct_1m">1 Month</button>
+        <button class="tab-btn" data-period="pct_3m">3 Months</button>
+        <button class="tab-btn" data-period="pct_1y">1 Year</button>
+      </div>
+      <div class="heatmap-grid" id="heatmapGrid"></div>
+    </section>
+  </div>
+
+  <!-- Edit Modal -->
+  <div class="modal-overlay" id="editModal" style="display:none">
+    <div class="modal">
+      <h3>Edit Holding</h3>
+      <input type="hidden" id="editId" />
+      <div class="form-group">
+        <label>Buy Price</label>
+        <input type="number" id="editBuyPrice" step="0.01" />
+      </div>
+      <div class="form-group">
+        <label>Quantity</label>
+        <input type="number" id="editQuantity" step="0.001" />
+      </div>
+      <div class="form-group">
+        <label>Buy Date</label>
+        <input type="date" id="editBuyDate" />
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveEdit()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
