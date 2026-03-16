@@ -1,41 +1,60 @@
-# Portfolio Performance Tracker
+# 📊 Portfolio Performance Tracker — PWA
 
-A web app to track stocks and mutual funds with **performance percentages** (1W, 1M, 3M, 1Y) — the feature missing from Zerodha Kite.
+A mobile-first **Progressive Web App** that tracks your stocks and mutual funds with **1W / 1M / 3M / 1Y performance percentages**.
+
+> No installation. No login. Works on any browser. Installs on mobile home screen like an app.
+
+## Live App
+
+👉 **https://ashi100sh.github.io/ClaudeCode-Experiment/**
 
 ## Features
 
-- Add stocks from **NSE, BSE, US markets**
-- Live prices via **Yahoo Finance** (free, no API key needed)
-- **Performance %** for 1 Week, 1 Month, 3 Months, 1 Year
-- **P&L tracking** (invested vs current value)
-- **Heatmap** visualisation by performance period
-- **Export to CSV** for offline analysis
-- **Import from CSV** to bulk-add holdings
-- Filter/search by symbol, name, or exchange
+| Feature | Detail |
+|---|---|
+| **Symbol Search** | Type company name or ticker — get live suggestions (Yahoo Finance) |
+| **Performance %** | 1 Week, 1 Month, 3 Months, 1 Year for every holding |
+| **P&L tracking** | Your invested vs current value |
+| **Heatmap** | Visual grid — instantly see what's up/down by period |
+| **Export CSV** | Download portfolio with all % columns |
+| **Import CSV** | Bulk-add holdings from a spreadsheet |
+| **Works offline** | Cached data shown when no internet |
+| **Install on phone** | Add to Home Screen → opens like a native app |
 
-## Setup
+## How to Install on Mobile (No App Store needed)
 
-```bash
-pip install -r requirements.txt
-python app.py
-```
+### iPhone / iPad (Safari)
+1. Open the URL in Safari
+2. Tap the **Share** button (box with arrow)
+3. Tap **"Add to Home Screen"**
+4. Done — icon appears on your home screen
 
-Then open http://localhost:5000
+### Android (Chrome)
+1. Open the URL in Chrome
+2. Tap the **⋮ menu** → **"Add to Home screen"** or **"Install app"**
+3. Done
 
-## Adding Stocks
+## Enable GitHub Pages
 
-| Exchange | Example Symbol | Notes |
-|----------|---------------|-------|
-| NSE      | RELIANCE, INFY, TCS | Indian NSE stocks |
-| BSE      | RELIANCE, INFY | Indian BSE stocks |
-| US       | AAPL, MSFT, TSLA | US market stocks |
-| MF       | 0P0001JFT5.BO | Yahoo Finance MF symbol |
+1. Go to your repo → **Settings** → **Pages**
+2. Source: **Deploy from a branch**
+3. Branch: **main** → **/ (root)**
+4. Save — app is live in ~1 minute
 
 ## CSV Import Format
 
 ```csv
-symbol,exchange,buy_price,quantity,buy_date,asset_type
-RELIANCE,NSE,2500.00,10,2023-01-15,stock
-INFY,NSE,1400.00,25,2023-03-20,stock
-AAPL,US,150.00,5,2022-11-01,stock
+symbol,exchange,buy_price,quantity,buy_date
+RELIANCE.NS,NSE,2500.00,10,2023-01-15
+INFY.NS,NSE,1400.00,25,2023-03-20
+AAPL,US,150.00,5,2022-11-01
+```
+
+## Also Included: Python Backend (optional)
+
+If you want a local server version with persistent DB:
+```bash
+pip install -r requirements.txt
+python app.py
+# Open http://localhost:5000
 ```

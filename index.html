@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="theme-color" content="#6366f1" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Portfolio" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <title>Portfolio Tracker</title>
+  <style>
+    :root {
+      --bg: #0f1117; --bg2: #1a1d27; --bg3: #242736;
+      --border: #2e3248; --text: #e2e8f0; --muted: #8892a4;
+      --accent: #6366f1; --green: #22c55e; --red: #ef4444;
+      --yellow: #eab308; --r: 12px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; overscroll-behavior: none; }
+
+    /* ── Layout ── */
+    .shell { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+    .topbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 12px 16px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .topbar-title { font-size: 16px; font-weight: 700; flex: 1; }
+    .content { flex: 1; overflow-y: auto; padding: 0 0 80px; }
+    .bottomnav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg2); border-top: 1px solid var(--border); display: flex; z-index: 100; }
+    .nav-btn { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 4px 14px; font-size: 10px; color: var(--muted); background: none; border: none; cursor: pointer; transition: color 0.15s; }
+    .nav-btn.active { color: var(--accent); }
+    .nav-btn svg { width: 22px; height: 22px; }
+
+    /* ── Pages ── */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ── Summary Strip ── */
+    .summary-strip { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--border); margin-bottom: 1px; }
+    .sum-cell { background: var(--bg2); padding: 14px 16px; }
+    .sum-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+    .sum-val { font-size: 18px; font-weight: 700; }
+
+    /* ── Holdings List ── */
+    .section-title { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; padding: 12px 16px 6px; }
+    .holding-card { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+    .holding-card:active { background: var(--bg3); }
+    .hc-icon { width: 40px; height: 40px; border-radius: 10px; background: var(--bg3); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; color: var(--accent); flex-shrink: 0; letter-spacing: -0.5px; }
+    .hc-body { flex: 1; min-width: 0; }
+    .hc-top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+    .hc-symbol { font-weight: 700; font-size: 15px; }
+    .hc-price { font-weight: 600; font-size: 15px; }
+    .hc-mid { display: flex; justify-content: space-between; align-items: center; margin-top: 3px; }
+    .hc-name { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+    .hc-pl { font-size: 12px; font-weight: 600; }
+    .hc-perfs { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+    .perf-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; white-space: nowrap; }
+    .perf-pill.pos { background: rgba(34,197,94,0.15); color: #4ade80; }
+    .perf-pill.neg { background: rgba(239,68,68,0.15); color: #f87171; }
+    .perf-pill.na  { background: var(--bg3); color: var(--muted); }
+
+    .pos { color: var(--green); }
+    .neg { color: var(--red); }
+
+    .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state p { font-size: 15px; margin-bottom: 6px; color: var(--text); }
+    .empty-state small { font-size: 13px; }
+
+    /* ── FAB ── */
+    .fab { position: fixed; bottom: 78px; right: 20px; width: 52px; height: 52px; border-radius: 50%; background: var(--accent); border: none; color: #fff; font-size: 26px; cursor: pointer; box-shadow: 0 4px 20px rgba(99,102,241,0.5); display: flex; align-items: center; justify-content: center; z-index: 99; transition: transform 0.15s; }
+    .fab:active { transform: scale(0.94); }
+
+    /* ── Sheet (bottom drawer) ── */
+    .sheet-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: none; align-items: flex-end; }
+    .sheet-overlay.open { display: flex; }
+    .sheet { background: var(--bg2); border-radius: 20px 20px 0 0; width: 100%; max-height: 95vh; overflow-y: auto; padding: 0 0 env(safe-area-inset-bottom); }
+    .sheet-handle { width: 36px; height: 4px; background: var(--border); border-radius: 2px; margin: 12px auto 8px; }
+    .sheet-header { padding: 0 20px 16px; display: flex; align-items: center; justify-content: space-between; }
+    .sheet-title { font-size: 17px; font-weight: 700; }
+    .sheet-close { background: var(--bg3); border: none; color: var(--muted); width: 30px; height: 30px; border-radius: 50%; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .sheet-body { padding: 0 20px 24px; }
+
+    /* ── Search ── */
+    .search-wrap { position: relative; margin-bottom: 16px; }
+    .search-input { width: 100%; background: var(--bg3); border: 1.5px solid var(--border); border-radius: 10px; color: var(--text); padding: 12px 40px 12px 14px; font-size: 16px; outline: none; }
+    .search-input:focus { border-color: var(--accent); }
+    .search-spinner { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); display: none; }
+    .search-spinner.on { display: block; }
+    .spin { width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .search-results { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; display: none; }
+    .search-results.show { display: block; }
+    .result-item { padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; display: flex; align-items: center; gap: 10px; }
+    .result-item:last-child { border-bottom: none; }
+    .result-item:active { background: var(--bg2); }
+    .result-sym { font-weight: 700; font-size: 14px; }
+    .result-name { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .result-exch { margin-left: auto; font-size: 11px; background: var(--bg2); border: 1px solid var(--border); padding: 2px 6px; border-radius: 4px; color: var(--muted); white-space: nowrap; }
+    .selected-sym { background: rgba(99,102,241,0.1); border: 1.5px solid var(--accent); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; display: none; }
+    .selected-sym.show { display: flex; align-items: center; gap: 10px; }
+    .selected-sym-name { flex: 1; }
+    .selected-sym-name strong { display: block; font-size: 14px; }
+    .selected-sym-name small { color: var(--muted); font-size: 12px; }
+    .selected-clear { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; padding: 4px; }
+
+    /* ── Form fields ── */
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+    .field input { width: 100%; background: var(--bg3); border: 1.5px solid var(--border); border-radius: 10px; color: var(--text); padding: 12px 14px; font-size: 16px; outline: none; }
+    .field input:focus { border-color: var(--accent); }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    /* ── Buttons ── */
+    .btn-full { width: 100%; padding: 14px; border-radius: 12px; border: none; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:active { opacity: 0.85; }
+    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Heatmap Page ── */
+    .period-tabs { display: flex; gap: 8px; padding: 14px 16px 10px; overflow-x: auto; }
+    .period-tabs::-webkit-scrollbar { display: none; }
+    .ptab { padding: 7px 16px; border-radius: 20px; border: 1.5px solid var(--border); background: none; color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .ptab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .heatmap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; padding: 8px 16px 20px; }
+    .htile { border-radius: 10px; padding: 12px 8px; text-align: center; }
+    .htile-sym { font-weight: 700; font-size: 13px; }
+    .htile-pct { font-size: 14px; font-weight: 700; margin-top: 4px; }
+    .htile-na { font-size: 12px; color: rgba(255,255,255,0.4); margin-top: 4px; }
+
+    /* ── Detail Sheet ── */
+    .detail-header { padding: 16px 20px 12px; }
+    .detail-sym { font-size: 24px; font-weight: 800; }
+    .detail-name { color: var(--muted); font-size: 14px; margin-top: 2px; }
+    .detail-price { font-size: 32px; font-weight: 800; margin-top: 12px; }
+    .detail-pl { font-size: 15px; margin-top: 4px; }
+    .perf-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--border); margin: 12px 0; }
+    .perf-cell { background: var(--bg3); padding: 14px 16px; }
+    .perf-cell-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+    .perf-cell-val { font-size: 20px; font-weight: 700; }
+    .detail-meta { padding: 0 20px; }
+    .meta-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+    .meta-row:last-child { border-bottom: none; }
+    .meta-key { color: var(--muted); }
+    .detail-actions { padding: 16px 20px; display: flex; gap: 10px; }
+    .btn-del { flex: 1; padding: 13px; border-radius: 10px; border: 1.5px solid var(--red); background: none; color: var(--red); font-size: 15px; font-weight: 600; cursor: pointer; }
+    .btn-del:active { background: var(--red); color: #fff; }
+
+    /* ── Topbar refresh ── */
+    .icon-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 16px; display: flex; align-items: center; gap: 4px; font-size: 14px; }
+    .icon-btn:active { border-color: var(--accent); }
+    .last-update { font-size: 11px; color: var(--muted); }
+
+    /* ── Toast ── */
+    .toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(20px); background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 10px 18px; font-size: 13px; z-index: 500; opacity: 0; transition: all 0.25s; white-space: nowrap; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── Export/Import ── */
+    .action-row { display: flex; gap: 10px; padding: 12px 16px; }
+    .action-btn { flex: 1; padding: 11px 8px; border-radius: 10px; border: 1.5px solid var(--border); background: var(--bg3); color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .action-btn:active { border-color: var(--accent); color: var(--accent); }
+
+    /* Swipe delete hint */
+    .swipe-hint { font-size: 11px; color: var(--muted); text-align: center; padding: 4px; }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="topbar-title">📊 Portfolio</div>
+    <span class="last-update" id="lastUpdate"></span>
+    <button class="icon-btn" id="refreshBtn" onclick="refreshAll()">↻ Refresh</button>
+  </div>
+
+  <!-- Scrollable content -->
+  <div class="content">
+
+    <!-- ── PAGE: Portfolio ── -->
+    <div class="page active" id="page-portfolio">
+      <!-- Summary -->
+      <div class="summary-strip" id="summaryStrip">
+        <div class="sum-cell"><div class="sum-label">Invested</div><div class="sum-val" id="sumInvested">₹0</div></div>
+        <div class="sum-cell"><div class="sum-label">Current</div><div class="sum-val" id="sumCurrent">₹0</div></div>
+        <div class="sum-cell"><div class="sum-label">P&amp;L</div><div class="sum-val" id="sumPL">₹0</div></div>
+        <div class="sum-cell"><div class="sum-label">Return</div><div class="sum-val" id="sumReturn">0%</div></div>
+      </div>
+
+      <div class="action-row">
+        <button class="action-btn" onclick="exportCSV()">⬇ Export CSV</button>
+        <button class="action-btn" onclick="document.getElementById('csvInput').click()">⬆ Import CSV</button>
+        <input type="file" id="csvInput" accept=".csv" style="display:none" onchange="importCSV(this)" />
+      </div>
+
+      <div class="section-title">Holdings</div>
+      <div id="holdingsList"></div>
+    </div>
+
+    <!-- ── PAGE: Heatmap ── -->
+    <div class="page" id="page-heatmap">
+      <div class="period-tabs" id="periodTabs">
+        <button class="ptab active" data-p="pct_1w">1 Week</button>
+        <button class="ptab" data-p="pct_1m">1 Month</button>
+        <button class="ptab" data-p="pct_3m">3 Months</button>
+        <button class="ptab" data-p="pct_1y">1 Year</button>
+        <button class="ptab" data-p="pl_pct">My P&amp;L</button>
+      </div>
+      <div class="heatmap-grid" id="heatmapGrid"></div>
+    </div>
+
+  </div><!-- /content -->
+
+  <!-- Bottom nav -->
+  <nav class="bottomnav">
+    <button class="nav-btn active" data-page="portfolio" onclick="goPage('portfolio',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Portfolio
+    </button>
+    <button class="nav-btn" data-page="heatmap" onclick="goPage('heatmap',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h5v5H3zM10 3h5v5h-5zM17 3h4v5h-4zM3 10h5v5H3zM10 10h5v5h-5zM17 10h4v5h-4zM3 17h5v4H3zM10 17h5v4h-5zM17 17h4v4h-4z"/></svg>
+      Heatmap
+    </button>
+  </nav>
+</div>
+
+<!-- FAB -->
+<button class="fab" onclick="openAddSheet()" title="Add stock">+</button>
+
+<!-- ── Add Stock Sheet ── -->
+<div class="sheet-overlay" id="addSheet">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <div class="sheet-title">Add Holding</div>
+      <button class="sheet-close" onclick="closeAddSheet()">✕</button>
+    </div>
+    <div class="sheet-body">
+      <!-- Symbol search -->
+      <div class="search-wrap">
+        <input class="search-input" id="symSearch" type="text" placeholder="Search symbol or company…" autocomplete="off" autocorrect="off" spellcheck="false" oninput="onSymSearch(this.value)" />
+        <div class="search-spinner" id="searchSpinner"><div class="spin"></div></div>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+
+      <!-- Selected symbol display -->
+      <div class="selected-sym" id="selectedSym">
+        <div class="selected-sym-name">
+          <strong id="selSymText"></strong>
+          <small id="selNameText"></small>
+        </div>
+        <button class="selected-clear" onclick="clearSym()">✕</button>
+      </div>
+
+      <!-- Fields -->
+      <div class="field-row">
+        <div class="field">
+          <label>Buy Price (₹)</label>
+          <input type="number" id="fBuyPrice" inputmode="decimal" placeholder="0.00" step="0.01" min="0" />
+        </div>
+        <div class="field">
+          <label>Quantity</label>
+          <input type="number" id="fQty" inputmode="decimal" placeholder="1" step="0.001" min="0" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Buy Date (optional)</label>
+        <input type="date" id="fDate" />
+      </div>
+
+      <button class="btn-full btn-primary" id="addBtn" onclick="addHolding()" disabled>Add to Portfolio</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Detail Sheet ── -->
+<div class="sheet-overlay" id="detailSheet">
+  <div class="sheet" id="detailSheetBody"></div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ───────────────────────────────────────────
+//  Constants & State
+// ───────────────────────────────────────────
+const PROXY = 'https://corsproxy.io/?url=';
+const YF_SEARCH = 'https://query2.finance.yahoo.com/v1/finance/search?q=';
+const YF_CHART  = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+
+let portfolio = loadPortfolio(); // [{id,symbol,yf_symbol,name,exchange,buy_price,qty,buy_date}]
+let liveData  = {};  // yf_symbol -> {price,pct_1w,pct_1m,pct_3m,pct_1y,name}
+let selectedSym = null; // {symbol, yf_symbol, name, exchange}
+let searchTimer = null;
+let currentPeriod = 'pct_1w';
+
+// ───────────────────────────────────────────
+//  LocalStorage
+// ───────────────────────────────────────────
+function loadPortfolio() {
+  try { return JSON.parse(localStorage.getItem('ptf_v1') || '[]'); }
+  catch { return []; }
+}
+function savePortfolio() {
+  localStorage.setItem('ptf_v1', JSON.stringify(portfolio));
+}
+
+// ───────────────────────────────────────────
+//  Navigation
+// ───────────────────────────────────────────
+function goPage(name, btn) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'heatmap') renderHeatmap();
+}
+
+// ───────────────────────────────────────────
+//  Symbol Search
+// ───────────────────────────────────────────
+function onSymSearch(q) {
+  clearTimeout(searchTimer);
+  const results = document.getElementById('searchResults');
+  if (q.length < 2) { results.classList.remove('show'); return; }
+  document.getElementById('searchSpinner').classList.add('on');
+  searchTimer = setTimeout(() => searchSymbols(q), 350);
+}
+
+async function searchSymbols(q) {
+  const spinner = document.getElementById('searchSpinner');
+  const results = document.getElementById('searchResults');
+  try {
+    const url = PROXY + encodeURIComponent(YF_SEARCH + encodeURIComponent(q) + '&lang=en-US&region=IN&quotesCount=8&enableFuzzyQuery=true');
+    const res = await fetch(url);
+    const data = await res.json();
+    const quotes = data.quotes || [];
+    if (quotes.length === 0) {
+      results.innerHTML = '<div class="result-item"><span style="color:var(--muted)">No results found</span></div>';
+    } else {
+      results.innerHTML = quotes.map(q => {
+        const exch = q.exchange || q.quoteType || '';
+        return `<div class="result-item" onclick="selectSym('${esc(q.symbol)}','${esc(q.shortname||q.longname||q.symbol)}','${esc(exch)}')">
+          <div style="flex:1;min-width:0">
+            <div class="result-sym">${q.symbol}</div>
+            <div class="result-name">${q.shortname || q.longname || ''}</div>
+          </div>
+          <span class="result-exch">${exch}</span>
+        </div>`;
+      }).join('');
+    }
+    results.classList.add('show');
+  } catch(e) {
+    results.innerHTML = '<div class="result-item"><span style="color:var(--muted)">Search failed. Check connection.</span></div>';
+    results.classList.add('show');
+  } finally {
+    spinner.classList.remove('on');
+  }
+}
+
+function esc(s) { return String(s).replace(/'/g,"&#39;").replace(/"/g,'&quot;'); }
+
+function selectSym(symbol, name, exchange) {
+  selectedSym = { symbol, name, exchange, yf_symbol: symbol };
+  document.getElementById('symSearch').value = '';
+  document.getElementById('searchResults').classList.remove('show');
+  document.getElementById('selSymText').textContent = symbol;
+  document.getElementById('selNameText').textContent = name + (exchange ? ' · ' + exchange : '');
+  document.getElementById('selectedSym').classList.add('show');
+  document.getElementById('addBtn').disabled = false;
+}
+
+function clearSym() {
+  selectedSym = null;
+  document.getElementById('selectedSym').classList.remove('show');
+  document.getElementById('addBtn').disabled = true;
+  document.getElementById('symSearch').value = '';
+}
+
+// ───────────────────────────────────────────
+//  Add Sheet
+// ───────────────────────────────────────────
+function openAddSheet() {
+  document.getElementById('addSheet').classList.add('open');
+  setTimeout(() => document.getElementById('symSearch').focus(), 200);
+}
+function closeAddSheet() {
+  document.getElementById('addSheet').classList.remove('open');
+  clearSym();
+  document.getElementById('fBuyPrice').value = '';
+  document.getElementById('fQty').value = '';
+  document.getElementById('fDate').value = '';
+}
+
+function addHolding() {
+  if (!selectedSym) return;
+  const bp = parseFloat(document.getElementById('fBuyPrice').value);
+  const qty = parseFloat(document.getElementById('fQty').value);
+  if (!bp || bp <= 0 || !qty || qty <= 0) { showToast('Enter valid price and quantity'); return; }
+  const entry = {
+    id: Date.now(),
+    symbol: selectedSym.symbol,
+    yf_symbol: selectedSym.yf_symbol,
+    name: selectedSym.name,
+    exchange: selectedSym.exchange,
+    buy_price: bp,
+    qty: qty,
+    buy_date: document.getElementById('fDate').value || '',
+  };
+  portfolio.push(entry);
+  savePortfolio();
+  closeAddSheet();
+  showToast('Added ' + entry.symbol);
+  refreshAll();
+}
+
+// ───────────────────────────────────────────
+//  Live Data
+// ───────────────────────────────────────────
+async function fetchLive(yf_symbol) {
+  try {
+    const url = PROXY + encodeURIComponent(YF_CHART + encodeURIComponent(yf_symbol) + '?interval=1d&range=1y');
+    const res = await fetch(url);
+    const data = await res.json();
+    const result = data.chart && data.chart.result && data.chart.result[0];
+    if (!result) return null;
+    const closes = result.indicators.quote[0].close;
+    const valid = closes.filter(c => c != null);
+    if (!valid.length) return null;
+    const cur = valid[valid.length - 1];
+    const meta = result.meta || {};
+
+    function pctAt(daysAgo) {
+      const ts = result.timestamp;
+      const targetTs = ts[ts.length - 1] - daysAgo * 86400;
+      let best = null;
+      for (let i = ts.length - 2; i >= 0; i--) {
+        if (ts[i] <= targetTs && closes[i] != null) { best = closes[i]; break; }
+      }
+      if (!best || best === 0) return null;
+      return parseFloat(((cur - best) / best * 100).toFixed(2));
+    }
+
+    return {
+      price: parseFloat(cur.toFixed(2)),
+      pct_1w: pctAt(7),
+      pct_1m: pctAt(30),
+      pct_3m: pctAt(90),
+      pct_1y: pctAt(365),
+      currency: meta.currency || '₹',
+    };
+  } catch { return null; }
+}
+
+async function refreshAll() {
+  const btn = document.getElementById('refreshBtn');
+  btn.textContent = '…';
+  btn.disabled = true;
+  const unique = [...new Set(portfolio.map(h => h.yf_symbol))];
+  await Promise.all(unique.map(async sym => {
+    const d = await fetchLive(sym);
+    if (d) liveData[sym] = d;
+  }));
+  renderPortfolio();
+  renderHeatmap();
+  document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  btn.textContent = '↻ Refresh';
+  btn.disabled = false;
+}
+
+// ───────────────────────────────────────────
+//  Portfolio Render
+// ───────────────────────────────────────────
+function renderPortfolio() {
+  let inv = 0, cur = 0;
+  const list = document.getElementById('holdingsList');
+
+  if (portfolio.length === 0) {
+    list.innerHTML = `<div class="empty-state">
+      <div class="icon">📈</div>
+      <p>No holdings yet</p>
+      <small>Tap + to add your first stock</small>
+    </div>`;
+    document.getElementById('sumInvested').textContent = '₹0';
+    document.getElementById('sumCurrent').textContent = '₹0';
+    document.getElementById('sumPL').textContent = '₹0';
+    document.getElementById('sumReturn').textContent = '0%';
+    return;
+  }
+
+  list.innerHTML = portfolio.map(h => {
+    const d = liveData[h.yf_symbol];
+    const invested = h.buy_price * h.qty;
+    const curVal = d ? d.price * h.qty : invested;
+    const pl = curVal - invested;
+    const plPct = invested ? pl / invested * 100 : 0;
+    inv += invested; cur += curVal;
+
+    const priceHtml = d ? fmt(d.price) : '<span style="color:var(--muted)">—</span>';
+    const plHtml = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
+
+    const pills = d ? [
+      ['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]
+    ].map(([lbl, v]) => v == null
+      ? `<span class="perf-pill na">${lbl} —</span>`
+      : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`
+    ).join('') : '<span class="perf-pill na">Loading…</span>';
+
+    const initials = h.symbol.slice(0, 3).replace('.NS','').replace('.BO','');
+
+    return `<div class="holding-card" onclick="openDetail(${h.id})">
+      <div class="hc-icon">${initials}</div>
+      <div class="hc-body">
+        <div class="hc-top">
+          <span class="hc-symbol">${h.symbol.replace('.NS','').replace('.BO','')}</span>
+          <span class="hc-price">${priceHtml}</span>
+        </div>
+        <div class="hc-mid">
+          <span class="hc-name">${h.name || ''}</span>
+          <span class="hc-pl">${plHtml}</span>
+        </div>
+        <div class="hc-perfs">${pills}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const totalPL = cur - inv;
+  const totalRet = inv ? totalPL / inv * 100 : 0;
+  document.getElementById('sumInvested').textContent = fmtC(inv);
+  document.getElementById('sumCurrent').textContent  = fmtC(cur);
+  const plEl = document.getElementById('sumPL');
+  plEl.textContent = (totalPL >= 0 ? '+' : '') + fmtC(totalPL);
+  plEl.className = 'sum-val ' + (totalPL >= 0 ? 'pos' : 'neg');
+  const retEl = document.getElementById('sumReturn');
+  retEl.textContent = (totalRet >= 0 ? '+' : '') + totalRet.toFixed(1) + '%';
+  retEl.className = 'sum-val ' + (totalRet >= 0 ? 'pos' : 'neg');
+}
+
+// ───────────────────────────────────────────
+//  Heatmap
+// ───────────────────────────────────────────
+function renderHeatmap() {
+  const grid = document.getElementById('heatmapGrid');
+  if (portfolio.length === 0) {
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--muted);padding:40px">Add holdings to see heatmap</div>';
+    return;
+  }
+  grid.innerHTML = portfolio.map(h => {
+    const d = liveData[h.yf_symbol];
+    let val = null;
+    if (currentPeriod === 'pl_pct' && d) {
+      const invested = h.buy_price * h.qty;
+      const curVal = d.price * h.qty;
+      val = invested ? parseFloat(((curVal - invested) / invested * 100).toFixed(2)) : null;
+    } else if (d) {
+      val = d[currentPeriod];
+    }
+    const bg = heatBg(val);
+    const sym = h.symbol.replace('.NS','').replace('.BO','');
+    const pctHtml = val != null
+      ? `<div class="htile-pct">${val >= 0 ? '+' : ''}${val.toFixed(1)}%</div>`
+      : `<div class="htile-na">—</div>`;
+    return `<div class="htile" style="background:${bg}" onclick="openDetail(${h.id})">
+      <div class="htile-sym">${sym}</div>${pctHtml}
+    </div>`;
+  }).join('');
+}
+
+function heatBg(v) {
+  if (v == null) return 'rgba(42,46,64,0.9)';
+  if (v >= 15)  return 'rgba(34,197,94,0.6)';
+  if (v >= 5)   return 'rgba(34,197,94,0.35)';
+  if (v >= 0)   return 'rgba(34,197,94,0.15)';
+  if (v >= -5)  return 'rgba(239,68,68,0.15)';
+  if (v >= -15) return 'rgba(239,68,68,0.35)';
+  return 'rgba(239,68,68,0.6)';
+}
+
+document.getElementById('periodTabs').addEventListener('click', e => {
+  const btn = e.target.closest('.ptab');
+  if (!btn) return;
+  document.querySelectorAll('.ptab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentPeriod = btn.dataset.p;
+  renderHeatmap();
+});
+
+// ───────────────────────────────────────────
+//  Detail Sheet
+// ───────────────────────────────────────────
+function openDetail(id) {
+  const h = portfolio.find(x => x.id === id);
+  if (!h) return;
+  const d = liveData[h.yf_symbol];
+  const invested = h.buy_price * h.qty;
+  const curVal = d ? d.price * h.qty : invested;
+  const pl = curVal - invested;
+  const plPct = invested ? pl / invested * 100 : 0;
+  const sym = h.symbol.replace('.NS','').replace('.BO','');
+
+  function perfRow(label, key) {
+    const v = d && d[key];
+    const cls = v == null ? '' : v >= 0 ? 'pos' : 'neg';
+    const txt = v == null ? '—' : (v >= 0 ? '+' : '') + v + '%';
+    return `<div class="perf-cell"><div class="perf-cell-label">${label}</div><div class="perf-cell-val ${cls}">${txt}</div></div>`;
+  }
+
+  document.getElementById('detailSheetBody').innerHTML = `
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <div></div>
+      <button class="sheet-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="detail-header">
+      <div class="detail-sym">${sym}</div>
+      <div class="detail-name">${h.name || ''} · ${h.exchange || ''}</div>
+      <div class="detail-price">${d ? fmtC(d.price) : '—'}</div>
+      <div class="detail-pl ${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmtC(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%)</div>
+    </div>
+    <div class="perf-grid">
+      ${perfRow('1 Week', 'pct_1w')}
+      ${perfRow('1 Month', 'pct_1m')}
+      ${perfRow('3 Months', 'pct_3m')}
+      ${perfRow('1 Year', 'pct_1y')}
+    </div>
+    <div class="detail-meta">
+      <div class="meta-row"><span class="meta-key">Quantity</span><span>${h.qty}</span></div>
+      <div class="meta-row"><span class="meta-key">Buy Price</span><span>${fmtC(h.buy_price)}</span></div>
+      <div class="meta-row"><span class="meta-key">Invested</span><span>${fmtC(invested)}</span></div>
+      <div class="meta-row"><span class="meta-key">Current Value</span><span>${fmtC(curVal)}</span></div>
+      ${h.buy_date ? `<div class="meta-row"><span class="meta-key">Buy Date</span><span>${h.buy_date}</span></div>` : ''}
+    </div>
+    <div class="detail-actions">
+      <button class="btn-del" onclick="deleteHolding(${id})">Remove Holding</button>
+    </div>
+  `;
+  document.getElementById('detailSheet').classList.add('open');
+}
+
+function closeDetail() { document.getElementById('detailSheet').classList.remove('open'); }
+
+function deleteHolding(id) {
+  if (!confirm('Remove this holding?')) return;
+  portfolio = portfolio.filter(h => h.id !== id);
+  savePortfolio();
+  closeDetail();
+  renderPortfolio();
+  renderHeatmap();
+  showToast('Holding removed');
+}
+
+// ───────────────────────────────────────────
+//  CSV Export / Import
+// ───────────────────────────────────────────
+function exportCSV() {
+  const headers = ['Symbol','Name','Exchange','Buy Price','Quantity','Buy Date','Current Price','Current Value','P&L','P&L %','1W %','1M %','3M %','1Y %'];
+  const rows = portfolio.map(h => {
+    const d = liveData[h.yf_symbol];
+    const inv = h.buy_price * h.qty;
+    const cur = d ? d.price * h.qty : '';
+    const pl = cur !== '' ? cur - inv : '';
+    const plp = inv && pl !== '' ? (pl/inv*100).toFixed(2) : '';
+    return [
+      h.symbol, h.name, h.exchange,
+      h.buy_price, h.qty, h.buy_date,
+      d ? d.price : '', cur !== '' ? cur.toFixed(2) : '',
+      pl !== '' ? pl.toFixed(2) : '', plp,
+      d ? (d.pct_1w ?? '') : '', d ? (d.pct_1m ?? '') : '',
+      d ? (d.pct_3m ?? '') : '', d ? (d.pct_1y ?? '') : '',
+    ];
+  });
+  const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
+  a.download = 'portfolio_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  showToast('CSV exported');
+}
+
+function importCSV(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const lines = e.target.result.split('\n').filter(l => l.trim());
+    const headers = lines[0].split(',').map(h => h.replace(/"/g,'').trim().toLowerCase());
+    let added = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map(c => c.replace(/"/g,'').trim());
+      const row = {};
+      headers.forEach((h, idx) => row[h] = cols[idx] || '');
+      const sym = (row['symbol'] || '').toUpperCase().trim();
+      const bp = parseFloat(row['buy price'] || row['buy_price'] || 0);
+      const qty = parseFloat(row['quantity'] || 0);
+      if (!sym || !bp || !qty) continue;
+      portfolio.push({
+        id: Date.now() + i,
+        symbol: sym, yf_symbol: sym,
+        name: row['name'] || sym,
+        exchange: (row['exchange'] || 'NSE').toUpperCase(),
+        buy_price: bp, qty, buy_date: row['buy date'] || row['buy_date'] || '',
+      });
+      added++;
+    }
+    savePortfolio();
+    input.value = '';
+    showToast(`Imported ${added} holdings`);
+    refreshAll();
+  };
+  reader.readAsText(file);
+}
+
+// ───────────────────────────────────────────
+//  Helpers
+// ───────────────────────────────────────────
+function fmt(n) {
+  if (n == null) return '—';
+  return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtC(n) {
+  if (n == null) return '—';
+  return '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// Close sheets on overlay click
+document.getElementById('addSheet').addEventListener('click', e => { if (e.target === document.getElementById('addSheet')) closeAddSheet(); });
+document.getElementById('detailSheet').addEventListener('click', e => { if (e.target === document.getElementById('detailSheet')) closeDetail(); });
+
+// ───────────────────────────────────────────
+//  Service Worker
+// ───────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// ───────────────────────────────────────────
+//  Boot
+// ───────────────────────────────────────────
+renderPortfolio();
+if (portfolio.length > 0) refreshAll();
+</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head><title>Icon Generator - run once</title></head>
+<body>
+<canvas id="c192" width="192" height="192" style="display:none"></canvas>
+<canvas id="c512" width="512" height="512" style="display:none"></canvas>
+<a id="dl192" download="icon-192.png">Download 192</a><br/>
+<a id="dl512" download="icon-512.png">Download 512</a>
+<script>
+function draw(canvas, size) {
+  const ctx = canvas.getContext('2d');
+  const r = size * 0.18;
+  // Background
+  ctx.fillStyle = '#6366f1';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, size, size, r);
+  ctx.fill();
+  // Chart bars
+  const bars = [0.3, 0.55, 0.45, 0.7, 0.85, 0.6, 0.9];
+  const pad = size * 0.15;
+  const bw = (size - pad * 2) / bars.length;
+  const maxH = size - pad * 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  bars.forEach((h, i) => {
+    const bh = maxH * h;
+    ctx.beginPath();
+    ctx.roundRect(pad + i * bw + bw * 0.1, size - pad - bh, bw * 0.7, bh, 3);
+    ctx.fill();
+  });
+  // Trend line
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = size * 0.025;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  bars.forEach((h, i) => {
+    const x = pad + i * bw + bw * 0.45;
+    const y = size - pad - maxH * h;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+const c192 = document.getElementById('c192');
+const c512 = document.getElementById('c512');
+draw(c192, 192);
+draw(c512, 512);
+document.getElementById('dl192').href = c192.toDataURL('image/png');
+document.getElementById('dl512').href = c512.toDataURL('image/png');
+// Auto-log data URLs for copying
+console.log('192:', c192.toDataURL('image/png').slice(0, 80));
+</script>
+</body>
+</html>
