@@ -333,7 +333,13 @@
     </div>
     <span class="last-update" id="lastUpdate"></span>
     <button class="icon-btn theme-btn" onclick="cycleTheme()" id="themeBtn" title="Toggle theme">☀️</button>
-    <button class="icon-btn" id="refreshBtn" onclick="refreshAll()">
+    <button class="icon-btn" id="retryBtn" onclick="refreshAll('pending')" style="display:none" title="">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13">
+        <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1014.85-3.36L14 8"/>
+      </svg>
+      Retry
+    </button>
+    <button class="icon-btn" id="refreshBtn" onclick="refreshAll('all')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
         <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
@@ -524,7 +530,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.15';
+const APP_BUILD  = '20260317.16';
 const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -554,6 +560,9 @@ function normalizeYfSymbol(raw, exchange) {
 
 /** Strip .NS / .BO suffix for display */
 function displaySym(s) { return (s || '').replace(/\.(NS|BO)$/i, ''); }
+
+/** Sovereign Gold Bonds — Yahoo Finance has no data for these */
+function isSgb(sym) { return /-GB(\.(NS|BO))?$/i.test(sym || ''); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Indian stock name → NSE ticker mapping (used when search proxy is down)
@@ -1037,36 +1046,64 @@ async function fetchLive(yf_symbol) {
   } catch { return null; }
 }
 
-async function refreshAll() {
+/**
+ * refreshAll(mode)
+ *  mode='all'     — fetch every non-SGB symbol (full refresh)
+ *  mode='pending' — fetch only symbols not yet in liveData (import / retry missing)
+ */
+async function refreshAll(mode = 'all') {
   if (isRefreshing) { showToast('Refresh in progress…'); return; }
 
-  const unique = [...new Set(portfolio.map(h => h.yf_symbol))];
-  if (!unique.length) return;
+  const allUnique  = [...new Set(portfolio.map(h => h.yf_symbol))];
+  const fetchable  = allUnique.filter(s => !isSgb(s));
+
+  // On a full refresh, notify once about any SGBs being skipped
+  if (mode === 'all') {
+    const sgbCount = allUnique.length - fetchable.length;
+    if (sgbCount > 0) showToast(`${sgbCount} SGB holding${sgbCount > 1 ? 's' : ''} skipped — not supported by Yahoo Finance`);
+  }
+
+  const toFetch = mode === 'pending' ? fetchable.filter(s => !liveData[s]) : fetchable;
+  if (!toFetch.length) { updateRetryBtn(); return; }
 
   isRefreshing = true;
   refreshAbort = false;
   const btn = document.getElementById('refreshBtn');
-  let done = 0;
 
-  for (const sym of unique) {
-    if (refreshAbort) break;
-    done++;
-    btn.innerHTML = SPIN_ICO + ` ${done}/${unique.length}`;
+  /** Fetch one pass over `symbols`; update cards live. */
+  const runPass = async (symbols, label) => {
+    for (let i = 0; i < symbols.length; i++) {
+      if (refreshAbort) return;
+      btn.innerHTML = SPIN_ICO + ` ${label}${i + 1}/${symbols.length}`;
 
-    // Mark cards for this symbol as "Fetching…"
-    fetchingSyms.add(sym);
-    portfolio.filter(h => h.yf_symbol === sym).forEach(h => {
-      const el = document.getElementById(`hcperf-${h.id}`);
-      if (el) el.innerHTML = '<span class="perf-pill na">⟳ Fetching…</span>';
-    });
+      const sym = symbols[i];
+      fetchingSyms.add(sym);
+      portfolio.filter(h => h.yf_symbol === sym).forEach(h => {
+        const el = document.getElementById(`hcperf-${h.id}`);
+        if (el) el.innerHTML = '<span class="perf-pill na">⟳ Fetching…</span>';
+      });
 
-    const d = await fetchLive(sym);
-    fetchingSyms.delete(sym);
-    if (d) liveData[sym] = d;
+      const d = await fetchLive(sym);
+      fetchingSyms.delete(sym);
+      if (d) liveData[sym] = d;
 
-    // Update cards + summary live as each result arrives
-    portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
-    updateSummary();
+      portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
+      updateSummary();
+    }
+  };
+
+  // ── Main pass ──
+  await runPass(toFetch, '');
+
+  // ── Retry rounds for symbols that returned null ──
+  // Delays: 2 s → 5 s → 10 s (up to 3 rounds)
+  const retryDelays = [2000, 5000, 10000];
+  let failed = toFetch.filter(s => !liveData[s]);
+  for (let round = 0; round < retryDelays.length && failed.length && !refreshAbort; round++) {
+    btn.innerHTML = SPIN_ICO + ` ↺ ${failed.length} pending…`;
+    await new Promise(r => setTimeout(r, retryDelays[round]));
+    await runPass(failed, `↺${round + 1} `);
+    failed = failed.filter(s => !liveData[s]);
   }
 
   if (!refreshAbort) {
@@ -1078,11 +1115,21 @@ async function refreshAll() {
   isRefreshing = false;
   refreshAbort = false;
   btn.innerHTML = REFRESH_ICO;
+  updateRetryBtn();
 
-  // Refresh analytics table if it's currently visible
   if (document.getElementById('page-heatmap').classList.contains('active')) {
     renderAnalytics();
   }
+}
+
+/** Show/hide the "Retry pending" button based on how many fetchable symbols still lack data. */
+function updateRetryBtn() {
+  const pending = [...new Set(portfolio.map(h => h.yf_symbol))]
+    .filter(s => !isSgb(s) && !liveData[s]).length;
+  const btn = document.getElementById('retryBtn');
+  if (!btn) return;
+  btn.style.display = pending > 0 ? '' : 'none';
+  btn.title = `${pending} holding${pending !== 1 ? 's' : ''} missing live data — click to retry`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1118,7 +1165,9 @@ function renderPortfolio() {
     const plHtml = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
 
     let pills;
-    if (d) {
+    if (isSgb(h.yf_symbol)) {
+      pills = '<span class="perf-pill na" title="Sovereign Gold Bonds are not supported by Yahoo Finance">SGB · not supported</span>';
+    } else if (d) {
       pills = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
         .map(([lbl, v]) => v == null
           ? `<span class="perf-pill na">${lbl} —</span>`
@@ -1185,7 +1234,9 @@ function updateCard(id) {
 
   plEl.innerHTML = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
 
-  if (d) {
+  if (isSgb(h.yf_symbol)) {
+    perfEl.innerHTML = '<span class="perf-pill na" title="Sovereign Gold Bonds are not supported by Yahoo Finance">SGB · not supported</span>';
+  } else if (d) {
     perfEl.innerHTML = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
       .map(([lbl, v]) => v == null
         ? `<span class="perf-pill na">${lbl} —</span>`
@@ -1608,7 +1659,8 @@ function importCSV(input) {
     if (added > 0) {
       showToast(`Imported ${added} holding${added !== 1 ? 's' : ''} · ${brokerLabel}${skipped ? ` (${skipped} skipped)` : ''}`);
       renderPortfolio(); // render cards first so updateCard() has DOM targets
-      refreshAll();
+      updateRetryBtn();
+      refreshAll('pending'); // only fetch symbols not yet in liveData
     } else {
       showToast(skipped ? `No valid rows — ${skipped} row${skipped !== 1 ? 's' : ''} skipped` : 'Nothing to import');
     }
@@ -1676,15 +1728,16 @@ document.getElementById('versionFooter2').textContent = 'StockPulse · Build ' +
     }
   }
   renderPortfolio();
+  updateRetryBtn();
   if (portfolio.length > 0 && isCacheStale()) {
-    refreshAll(); // background sequential refresh — stale or first open
+    refreshAll('all'); // background sequential refresh — stale or first open
   }
 })();
 
 // Re-check on PWA foreground resume (e.g. user comes back after hours)
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && portfolio.length > 0 && !isRefreshing && isCacheStale()) {
-    refreshAll();
+    refreshAll('all');
   }
 });
 </script>
