@@ -572,11 +572,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.21';
+const APP_BUILD  = '20260317.22';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
 const SPIN_ICO    = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.7s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>`;
+const STOP_ICO    = `<svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11" style="vertical-align:-1px;margin-right:3px"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>Stop`;
 
 // Yahoo Finance uses 'NSI' internally for NSE India — map to friendly labels
 const EXCH_DISPLAY = { NSI: 'NSE', BOM: 'BSE' };
@@ -805,6 +806,26 @@ const PROXY_DEFS = [
   // query2 via cors.eu.org — EU + query2 mirror combination
   {
     make: u => 'https://cors.eu.org/' + u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com'),
+    extract: async r => r.text()
+  },
+  // query2 via codetabs — codetabs + query2 mirror
+  {
+    make: u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com')),
+    extract: async r => r.text()
+  },
+  // query2 via proxy.cors.sh — cors.sh + query2 mirror
+  {
+    make: u => 'https://proxy.cors.sh/' + u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com'),
+    extract: async r => r.text()
+  },
+  // allorigins/get + query2 — JSON wrapper + query2 mirror
+  {
+    make: u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com')),
+    extract: async r => { const d = await r.json(); if (!d.contents) throw new Error('empty'); return d.contents; }
+  },
+  // corsproxy.io raw + query2 — non-encoded URL + query2 mirror
+  {
+    make: u => 'https://corsproxy.io/?' + u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com'),
     extract: async r => r.text()
   },
 ];
@@ -1278,6 +1299,13 @@ async function fetchLive(yf_symbol) {
  *  mode='all'     — fetch every non-SGB symbol (full refresh)
  *  mode='pending' — fetch only symbols not yet in liveData (import / retry missing)
  */
+function stopRefresh() {
+  if (!isRefreshing) return;
+  refreshAbort = true;
+  const btn = document.getElementById('refreshBtn');
+  if (btn) btn.innerHTML = SPIN_ICO + ' Stopping…';
+}
+
 async function refreshAll(mode = 'all') {
   if (isRefreshing) { showToast('Refresh in progress…'); return; }
 
@@ -1300,6 +1328,8 @@ async function refreshAll(mode = 'all') {
   if (mode === 'pending') localStorage.removeItem(PROXY_CACHE_KEY);
   updateRetryBtn(); // hide Retry button while refresh is running
   const btn = document.getElementById('refreshBtn');
+  btn.onclick = stopRefresh;
+  btn.innerHTML = STOP_ICO;
 
   /** Fetch one pass over `symbols`; update cards live. */
   const runPass = async (symbols, label) => {
@@ -1354,10 +1384,13 @@ async function refreshAll(mode = 'all') {
     const okCount   = toFetch.length - stillFailed.length;
     saveLiveCache();
     updateCacheBanner({ ok: okCount, fail: stillFailed.length }); // accurate result banner
+  } else {
+    updateCacheBanner(); // revert to age-based state after user stop
   }
 
   isRefreshing = false;
   refreshAbort = false;
+  btn.onclick = () => refreshAll('all');
   btn.innerHTML = REFRESH_ICO;
   updateRetryBtn();
 

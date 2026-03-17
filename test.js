@@ -6,6 +6,45 @@
 const NSE_EX = new Set(['NSI', 'NSE']);
 const BSE_EX = new Set(['BSE', 'BOM']);
 
+function isSgb(sym) { return /-GB(\.(NS|BO))?$/i.test(sym || ''); }
+
+function cacheAgeStr(ageMs) {
+  const m = Math.floor(ageMs / 60000);
+  if (m <  1)   return 'just now';
+  if (m < 60)   return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)   return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d !== 1 ? 's' : ''} ago`;
+}
+
+function esc(s) { return String(s).replace(/'/g, "&#39;").replace(/"/g, '&quot;'); }
+
+function parseCSVRow(line, delim = ',') {
+  if (delim === '\t') return line.split('\t').map(c => c.trim());
+  const cols = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (ch === delim && !inQ) {
+      cols.push(cur.trim()); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cols.push(cur.trim());
+  return cols;
+}
+
+function detectDelimiter(line) {
+  const tabs   = (line.match(/\t/g) || []).length;
+  const commas = (line.match(/,/g)  || []).length;
+  return tabs > commas ? '\t' : ',';
+}
+
 function normalizeYfSymbol(raw, exchange) {
   const s = (raw || '').trim().toUpperCase();
   if (!s || s.includes('.')) return s;
@@ -100,6 +139,53 @@ test('Groww-style CSV row',
 test('Missing exchange defaults to NSE',
   { sym:'RELIANCE', bp:2800, qty:2, exch:'NSE' },
   parseImportRow(['symbol','buy price','quantity'], ['RELIANCE','2800','2']));
+
+// ── isSgb ────────────────────────────────────────────────────────────────────
+console.log('\nisSgb');
+test('SGB symbol bare',              true,  isSgb('SGBBSE2428-GB'));
+test('SGB with .NS suffix',          true,  isSgb('SGBBSE2428-GB.NS'));
+test('SGB with .BO suffix',          true,  isSgb('SGBBSE2428-GB.BO'));
+test('SGB lowercase -gb',            true,  isSgb('SGBBSE2428-gb'));
+test('Regular stock → false',        false, isSgb('RELIANCE.NS'));
+test('Empty string → false',         false, isSgb(''));
+test('Null → false',                 false, isSgb(null));
+test('Symbol ending in GB but no dash → false', false, isSgb('SGBGB'));
+
+// ── cacheAgeStr ──────────────────────────────────────────────────────────────
+console.log('\ncacheAgeStr');
+test('< 1 min → just now',           'just now', cacheAgeStr(30000));
+test('exactly 0 ms → just now',      'just now', cacheAgeStr(0));
+test('1 min',                        '1m ago',   cacheAgeStr(60000));
+test('59 min',                       '59m ago',  cacheAgeStr(59 * 60000));
+test('1 hour',                       '1h ago',   cacheAgeStr(60 * 60000));
+test('23 hours',                     '23h ago',  cacheAgeStr(23 * 60 * 60000));
+test('1 day (singular)',             '1 day ago', cacheAgeStr(24 * 60 * 60000));
+test('2 days (plural)',              '2 days ago', cacheAgeStr(2 * 24 * 60 * 60000));
+
+// ── esc ──────────────────────────────────────────────────────────────────────
+console.log('\nesc');
+test('Escapes single quote',         'it&#39;s', esc("it's"));
+test('Escapes double quote',         '&quot;hi&quot;', esc('"hi"'));
+test('No special chars → unchanged', 'RELIANCE', esc('RELIANCE'));
+test('Number coerced to string',     '123',      esc(123));
+test('Empty string',                 '',         esc(''));
+
+// ── parseCSVRow ───────────────────────────────────────────────────────────────
+console.log('\nparseCSVRow');
+test('Simple comma row',             ['A','B','C'],           parseCSVRow('A,B,C'));
+test('Quoted field with comma',      ['RELIANCE','1,000','5'], parseCSVRow('"RELIANCE","1,000","5"'));
+test('Escaped double-quote in field',['say "hi"','x'],        parseCSVRow('"say ""hi""",x'));
+test('Tab-delimited fast path',      ['A','B','C'],           parseCSVRow('A\tB\tC', '\t'));
+test('Trailing empty field',         ['A','B',''],            parseCSVRow('A,B,'));
+test('Leading/trailing spaces trimmed', ['A','B'],            parseCSVRow(' A , B '));
+
+// ── detectDelimiter ───────────────────────────────────────────────────────────
+console.log('\ndetectDelimiter');
+test('More tabs → tab',   '\t', detectDelimiter('A\tB\tC,D'));
+test('More commas → comma', ',', detectDelimiter('A,B,C\tD'));
+test('Only commas → comma', ',', detectDelimiter('A,B,C'));
+test('Only tabs → tab',     '\t', detectDelimiter('A\tB\tC'));
+test('Equal counts → comma', ',', detectDelimiter('A\tB,C'));
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 const total = pass + fail;
