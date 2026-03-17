@@ -255,6 +255,9 @@
                 gap:5px; transition:border-color 0.15s,color 0.15s; white-space:nowrap; }
     .icon-btn:active { border-color:var(--accent); color:var(--accent); }
     .icon-btn svg { width:13px; height:13px; }
+    .icon-btn-cancel { border-color:#e05252; color:#e05252; }
+    .icon-btn-cancel:hover { background:#3a1a1a; border-color:#f07070; color:#f07070; }
+    .icon-btn-cancel:active { border-color:#f07070; color:#f07070; }
     .theme-btn { font-size:16px; padding:6px 9px; }
     .last-update { font-size:11px; color:var(--muted); font-weight:500; }
 
@@ -377,6 +380,12 @@
         <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1014.85-3.36L14 8"/>
       </svg>
       Retry
+    </button>
+    <button class="icon-btn icon-btn-cancel" id="cancelBtn" onclick="stopRefresh()" style="display:none" title="Stop the current refresh">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+      Cancel
     </button>
     <button class="icon-btn" id="refreshBtn" onclick="refreshAll('all')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -572,12 +581,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.22';
+const APP_BUILD  = '20260317.23';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
 const SPIN_ICO    = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.7s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>`;
-const STOP_ICO    = `<svg viewBox="0 0 24 24" fill="currentColor" width="11" height="11" style="vertical-align:-1px;margin-right:3px"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>Stop`;
+
 
 // Yahoo Finance uses 'NSI' internally for NSE India — map to friendly labels
 const EXCH_DISPLAY = { NSI: 'NSE', BOM: 'BSE' };
@@ -1302,8 +1311,8 @@ async function fetchLive(yf_symbol) {
 function stopRefresh() {
   if (!isRefreshing) return;
   refreshAbort = true;
-  const btn = document.getElementById('refreshBtn');
-  if (btn) btn.innerHTML = SPIN_ICO + ' Stopping…';
+  const cancelBtn = document.getElementById('cancelBtn');
+  if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.textContent = 'Stopping…'; }
 }
 
 async function refreshAll(mode = 'all') {
@@ -1328,8 +1337,9 @@ async function refreshAll(mode = 'all') {
   if (mode === 'pending') localStorage.removeItem(PROXY_CACHE_KEY);
   updateRetryBtn(); // hide Retry button while refresh is running
   const btn = document.getElementById('refreshBtn');
-  btn.onclick = stopRefresh;
-  btn.innerHTML = STOP_ICO;
+  btn.onclick = null; // progress indicator only — cancel is handled by cancelBtn
+  const cancelBtn = document.getElementById('cancelBtn');
+  if (cancelBtn) { cancelBtn.style.display = ''; cancelBtn.disabled = false; cancelBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Cancel'; }
 
   /** Fetch one pass over `symbols`; update cards live. */
   const runPass = async (symbols, label) => {
@@ -1392,6 +1402,8 @@ async function refreshAll(mode = 'all') {
   refreshAbort = false;
   btn.onclick = () => refreshAll('all');
   btn.innerHTML = REFRESH_ICO;
+  const cancelBtnEnd = document.getElementById('cancelBtn');
+  if (cancelBtnEnd) cancelBtnEnd.style.display = 'none';
   updateRetryBtn();
 
   if (document.getElementById('page-heatmap').classList.contains('active')) {
