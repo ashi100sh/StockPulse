@@ -285,9 +285,23 @@
 // ───────────────────────────────────────────
 //  Constants & State
 // ───────────────────────────────────────────
-const PROXY = 'https://corsproxy.io/?url=';
+const PROXIES = [
+  url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+  url => 'https://corsproxy.io/?url=' + encodeURIComponent(url),
+  url => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
+];
 const YF_SEARCH = 'https://query2.finance.yahoo.com/v1/finance/search?q=';
 const YF_CHART  = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+
+async function proxyFetch(url) {
+  for (const makeUrl of PROXIES) {
+    try {
+      const res = await fetch(makeUrl(url), { signal: AbortSignal.timeout(8000) });
+      if (res.ok) return res;
+    } catch {}
+  }
+  throw new Error('All proxies failed');
+}
 
 let portfolio = loadPortfolio(); // [{id,symbol,yf_symbol,name,exchange,buy_price,qty,buy_date}]
 let liveData  = {};  // yf_symbol -> {price,pct_1w,pct_1m,pct_3m,pct_1y,name}
@@ -332,8 +346,8 @@ async function searchSymbols(q) {
   const spinner = document.getElementById('searchSpinner');
   const results = document.getElementById('searchResults');
   try {
-    const url = PROXY + encodeURIComponent(YF_SEARCH + encodeURIComponent(q) + '&lang=en-US&region=IN&quotesCount=8&enableFuzzyQuery=true');
-    const res = await fetch(url);
+    const url = YF_SEARCH + encodeURIComponent(q) + '&lang=en-US&region=IN&quotesCount=8&enableFuzzyQuery=true';
+    const res = await proxyFetch(url);
     const data = await res.json();
     const quotes = data.quotes || [];
     if (quotes.length === 0) {
@@ -420,8 +434,8 @@ function addHolding() {
 // ───────────────────────────────────────────
 async function fetchLive(yf_symbol) {
   try {
-    const url = PROXY + encodeURIComponent(YF_CHART + encodeURIComponent(yf_symbol) + '?interval=1d&range=1y');
-    const res = await fetch(url);
+    const url = YF_CHART + encodeURIComponent(yf_symbol) + '?interval=1d&range=1y';
+    const res = await proxyFetch(url);
     const data = await res.json();
     const result = data.chart && data.chart.result && data.chart.result[0];
     if (!result) return null;

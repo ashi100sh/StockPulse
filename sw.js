@@ -1,4 +1,4 @@
-const CACHE = 'ptf-v1';
+const CACHE = 'ptf-v2';
 const STATIC = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -14,11 +14,20 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // For API calls (corsproxy) — always network, fallback to cache
-  if (e.request.url.includes('corsproxy') || e.request.url.includes('yahoo')) {
-    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+  // For API calls — always network, fallback to cache or error response
+  if (e.request.url.includes('corsproxy') || e.request.url.includes('allorigins') ||
+      e.request.url.includes('codetabs') || e.request.url.includes('yahoo')) {
+    e.respondWith(
+      fetch(e.request).catch(() =>
+        caches.match(e.request).then(r => r || new Response('{}', { status: 503, headers: { 'Content-Type': 'application/json' } }))
+      )
+    );
     return;
   }
-  // For app shell — cache first
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  // For app shell — cache first, fallback to network
+  e.respondWith(
+    caches.match(e.request).then(r => r || fetch(e.request).catch(() =>
+      new Response('Offline', { status: 503 })
+    ))
+  );
 });
