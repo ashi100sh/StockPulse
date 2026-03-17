@@ -285,19 +285,36 @@
 // ───────────────────────────────────────────
 //  Constants & State
 // ───────────────────────────────────────────
-const PROXIES = [
-  url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
-  url => 'https://corsproxy.io/?url=' + encodeURIComponent(url),
-  url => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(url),
-];
 const YF_SEARCH = 'https://query2.finance.yahoo.com/v1/finance/search?q=';
 const YF_CHART  = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 
-async function proxyFetch(url) {
-  for (const makeUrl of PROXIES) {
+// Each proxy: { make(url)->proxyUrl, extract(res)->Promise<string> }
+const PROXY_DEFS = [
+  {
+    // allorigins /get wraps JSON: { contents: "...", status: { http_code: 200 } }
+    make: u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
+    extract: async r => { const d = await r.json(); if (!d.contents) throw new Error('empty'); return d.contents; }
+  },
+  {
+    // corsproxy.org — direct pass-through with CORS headers
+    make: u => 'https://corsproxy.org/?' + encodeURIComponent(u),
+    extract: async r => r.text()
+  },
+  {
+    // allorigins /raw — direct pass-through
+    make: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+    extract: async r => r.text()
+  },
+];
+
+async function proxyFetch(rawUrl) {
+  for (const { make, extract } of PROXY_DEFS) {
     try {
-      const res = await fetch(makeUrl(url), { signal: AbortSignal.timeout(8000) });
-      if (res.ok) return res;
+      const res = await fetch(make(rawUrl), { signal: AbortSignal.timeout(9000) });
+      if (!res.ok) continue;
+      const text = await extract(res);
+      if (!text) continue;
+      return new Response(text, { headers: { 'Content-Type': 'application/json' } });
     } catch {}
   }
   throw new Error('All proxies failed');
@@ -349,7 +366,13 @@ async function searchSymbols(q) {
     const url = YF_SEARCH + encodeURIComponent(q) + '&lang=en-US&region=IN&quotesCount=8&enableFuzzyQuery=true';
     const res = await proxyFetch(url);
     const data = await res.json();
-    const quotes = data.quotes || [];
+    // Prioritise NSE/BSE/Indian results first
+    const INDIAN = new Set(['NSI','BSE','NSE','BOM','MUTUALFUND']);
+    const quotes = (data.quotes || []).sort((a, b) => {
+      const ai = INDIAN.has(a.exchange) || a.symbol?.endsWith('.NS') || a.symbol?.endsWith('.BO') ? 0 : 1;
+      const bi = INDIAN.has(b.exchange) || b.symbol?.endsWith('.NS') || b.symbol?.endsWith('.BO') ? 0 : 1;
+      return ai - bi;
+    });
     if (quotes.length === 0) {
       results.innerHTML = '<div class="result-item"><span style="color:var(--muted)">No results found</span></div>';
     } else {
