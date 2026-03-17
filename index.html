@@ -524,7 +524,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD = '20260317.5';
+const APP_BUILD = '20260317.6';
 
 // Yahoo Finance uses 'NSI' internally for NSE India — map to friendly labels
 const EXCH_DISPLAY = { NSI: 'NSE', BOM: 'BSE' };
@@ -552,17 +552,30 @@ function normalizeYfSymbol(raw, exchange) {
 function displaySym(s) { return (s || '').replace(/\.(NS|BO)$/i, ''); }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CORS Proxies
+//  CORS Proxies — raced in parallel; first success wins
 // ─────────────────────────────────────────────────────────────────────────────
 const PROXY_DEFS = [
+  // allorigins /get — wraps response in JSON { contents: "..." }
   {
     make: u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
     extract: async r => { const d = await r.json(); if (!d.contents) throw new Error('empty'); return d.contents; }
   },
+  // thingproxy — simple pass-through
+  {
+    make: u => 'https://thingproxy.freeboard.io/fetch/' + encodeURIComponent(u),
+    extract: async r => r.text()
+  },
+  // corsproxy.org — pass-through
   {
     make: u => 'https://corsproxy.org/?' + encodeURIComponent(u),
     extract: async r => r.text()
   },
+  // codetabs — pass-through
+  {
+    make: u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+    extract: async r => r.text()
+  },
+  // allorigins /raw — direct response
   {
     make: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
     extract: async r => r.text()
@@ -570,16 +583,28 @@ const PROXY_DEFS = [
 ];
 
 async function proxyFetch(rawUrl) {
-  for (const { make, extract } of PROXY_DEFS) {
-    try {
-      const res = await fetch(make(rawUrl), { signal: AbortSignal.timeout(9000) });
-      if (!res.ok) continue;
-      const text = await extract(res);
-      if (!text) continue;
-      return new Response(text, { headers: { 'Content-Type': 'application/json' } });
-    } catch {}
+  // Race all proxies simultaneously — fastest valid response wins.
+  // AbortControllers let us cancel the remaining in-flight requests.
+  const controllers = PROXY_DEFS.map(() => new AbortController());
+
+  const attempts = PROXY_DEFS.map(async ({ make, extract }, i) => {
+    const res = await fetch(make(rawUrl), {
+      signal: controllers[i].signal,
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await extract(res);
+    if (!text) throw new Error('empty response');
+    // Cancel all other in-flight requests
+    controllers.forEach((c, j) => { if (j !== i) c.abort(); });
+    return new Response(text, { headers: { 'Content-Type': 'application/json' } });
+  });
+
+  try {
+    return await Promise.any(attempts);
+  } catch {
+    throw new Error('All proxies failed');
   }
-  throw new Error('All proxies failed');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
