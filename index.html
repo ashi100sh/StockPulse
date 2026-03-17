@@ -559,7 +559,20 @@ function displaySym(s) { return (s || '').replace(/\.(NS|BO)$/i, ''); }
 //  CORS Proxies — raced in parallel; first valid response wins
 // ─────────────────────────────────────────────────────────────────────────────
 const PROXY_DEFS = [
-  // corsproxy.io — most reliable free proxy (note: .io, not .org)
+  // Direct fetch — Yahoo Finance chart API sometimes returns CORS headers
+  // when corsDomain param is present; fast-fails if blocked (no cost to racing)
+  {
+    make: u => u.includes('finance.yahoo.com')
+      ? u + (u.includes('?') ? '&' : '?') + 'corsDomain=finance.yahoo.com'
+      : u,
+    extract: async r => r.text()
+  },
+  // corsproxy.io — URL not encoded (some proxies prefer raw URL)
+  {
+    make: u => 'https://corsproxy.io/?' + u,
+    extract: async r => r.text()
+  },
+  // corsproxy.io — URL encoded
   {
     make: u => 'https://corsproxy.io/?' + encodeURIComponent(u),
     extract: async r => r.text()
@@ -574,7 +587,7 @@ const PROXY_DEFS = [
     make: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
     extract: async r => r.text()
   },
-  // cors.sh — secondary fallback
+  // cors.sh
   {
     make: u => 'https://proxy.cors.sh/' + u,
     extract: async r => r.text()
@@ -818,15 +831,29 @@ function addHolding() {
   fetchingSyms.add(sym);
   renderPortfolio();
 
-  // Fetch only this one symbol in the background
-  fetchLive(sym).then(d => {
+  // Fetch only this one symbol in the background with auto-retry
+  (async () => {
+    const MAX_TRIES = 3;
+    let d = null;
+    for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+      if (attempt > 1) {
+        // Wait before retry and show progress on each card pill
+        await new Promise(r => setTimeout(r, 2000 * (attempt - 1)));
+        portfolio.filter(h => h.yf_symbol === sym).forEach(h => {
+          const el = document.getElementById(`hcperf-${h.id}`);
+          if (el) el.innerHTML = `<span class="perf-pill na">⟳ Retry ${attempt}/${MAX_TRIES}…</span>`;
+        });
+      }
+      d = await fetchLive(sym);
+      if (d) break;
+    }
     fetchingSyms.delete(sym);
     if (d) liveData[sym] = d;
     portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
     updateSummary();
     saveLiveCache();
     if (document.getElementById('page-heatmap').classList.contains('active')) renderAnalytics();
-  });
+  })();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -834,7 +861,7 @@ function addHolding() {
 // ─────────────────────────────────────────────────────────────────────────────
 async function fetchLive(yf_symbol) {
   try {
-    const url = YF_CHART + encodeURIComponent(yf_symbol) + '?interval=1d&range=1y';
+    const url = YF_CHART + encodeURIComponent(yf_symbol) + '?interval=1d&range=1y&corsDomain=finance.yahoo.com';
     const res  = await proxyFetch(url);
     const data = await res.json();
     const result = data?.chart?.result?.[0];
