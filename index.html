@@ -286,14 +286,30 @@
              pointer-events:none; box-shadow:var(--shadow); }
     .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 
-    /* ── Analytics (Performance) table ── */
-    .analytics-toolbar { padding:12px 14px 8px; display:flex; align-items:center;
-                         justify-content:space-between; gap:8px; }
-    .analytics-title { font-size:11px; font-weight:700; color:var(--muted);
-                       text-transform:uppercase; letter-spacing:0.07em; }
-    .analytics-hint { font-size:11px; color:var(--muted); }
+    /* ── Analytics header (filter + summary) ── */
+    .analytics-header { padding:10px 14px 0; position:sticky; top:0; z-index:10;
+                        background:var(--bg); border-bottom:1px solid var(--border); }
+    .analytics-filter { display:flex; gap:3px; background:var(--bg2);
+                        border-radius:11px; padding:3px; margin-bottom:10px; }
+    .af-btn { flex:1; padding:7px 6px; border:none; background:transparent; color:var(--muted);
+              font-size:12px; font-weight:700; border-radius:9px; cursor:pointer;
+              transition:all 0.15s; font-family:inherit; letter-spacing:0.01em;
+              white-space:nowrap; user-select:none; }
+    .af-btn.active { background:var(--bg3); color:var(--text);
+                     border:1px solid var(--border); box-shadow:0 1px 3px rgba(0,0,0,0.15); }
+    .analytics-summary { display:flex; gap:0; flex-wrap:nowrap; overflow-x:auto;
+                         padding-bottom:10px; scrollbar-width:none; }
+    .analytics-summary::-webkit-scrollbar { display:none; }
+    .as-chip { font-size:11px; font-weight:600; color:var(--muted); white-space:nowrap;
+               padding-right:12px; }
+    .as-chip + .as-chip { border-left:1px solid var(--border); padding-left:12px; }
+    .as-chip.pos { color:var(--green); }
+    .as-chip.neg { color:var(--red); }
+    .as-chip strong { color:var(--text); }
+
+    /* ── Analytics table ── */
     .perf-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:20px; }
-    .perf-table { width:100%; border-collapse:collapse; min-width:680px; }
+    .perf-table { width:100%; border-collapse:collapse; min-width:580px; }
     .perf-table thead { position:sticky; top:0; z-index:5; }
     .perf-table th { background:var(--bg2); padding:10px 10px; font-size:10px; font-weight:700;
                      color:var(--muted); text-transform:uppercase; letter-spacing:0.06em;
@@ -308,17 +324,37 @@
     .perf-table th.sort-desc { color:var(--accent); }
     .perf-table th.sort-desc::after { content:' ↓'; }
     .perf-table td { padding:11px 10px; font-size:13px; text-align:right;
-                     border-bottom:1px solid var(--border); }
+                     border-bottom:1px solid var(--border); vertical-align:middle; }
     .perf-table td:first-child { text-align:left; padding-left:16px; }
     .perf-table td:last-child  { padding-right:16px; }
     .perf-table tr { cursor:pointer; }
     .perf-table tr:active td { background:var(--bg3); }
+    /* Watchlist rows — ultra-subtle left accent via inset shadow */
+    .perf-table tr.wl-row td:first-child { box-shadow:inset 2px 0 0 var(--accent-dim); }
+    /* Column hiding when watchlist-only filter active */
+    .perf-table.filter-wl th:nth-child(3),
+    .perf-table.filter-wl td:nth-child(3),
+    .perf-table.filter-wl th:nth-child(11),
+    .perf-table.filter-wl td:nth-child(11) { display:none; }
+    /* Section separator */
+    .perf-sep-row td { background:var(--bg2); padding:5px 16px; border-top:2px solid var(--border);
+                       border-bottom:none; }
+    .perf-sep-label { font-size:10px; font-weight:700; color:var(--muted);
+                      text-transform:uppercase; letter-spacing:0.1em; }
     .td-sym  { font-weight:800; font-size:13px; display:block; letter-spacing:-0.3px; }
     .td-name { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden;
                text-overflow:ellipsis; max-width:110px; display:block; margin-top:2px; }
+    .td-wl-tag { font-size:9px; font-weight:700; color:var(--accent);
+                 background:var(--accent-dim); border-radius:3px; padding:1px 4px;
+                 margin-left:5px; vertical-align:middle; display:inline-block; }
     .pct-pos { font-weight:700; color:var(--green); }
     .pct-neg { font-weight:700; color:var(--red); }
     .pct-na  { color:var(--muted); }
+    /* Heatmap cell backgrounds — intensity scales with magnitude */
+    .pct-pos.heat { border-radius:5px; padding:2px 6px; display:inline-block;
+                    background:rgba(34,197,94,var(--heat)); }
+    .pct-neg.heat { border-radius:5px; padding:2px 6px; display:inline-block;
+                    background:rgba(239,68,68,var(--heat)); }
     .price-cell { font-weight:600; }
     .val-cell   { font-weight:800; }
 
@@ -473,9 +509,13 @@
 
     <!-- PAGE: Analytics -->
     <div class="page" id="page-heatmap">
-      <div class="analytics-toolbar">
-        <span class="analytics-title">Performance</span>
-        <span class="analytics-hint">Tap column header to sort</span>
+      <div class="analytics-header">
+        <div class="analytics-filter">
+          <button class="af-btn active" onclick="setAnalyticsFilter('all')">All</button>
+          <button class="af-btn" onclick="setAnalyticsFilter('portfolio')">Portfolio</button>
+          <button class="af-btn" onclick="setAnalyticsFilter('watchlist')">Watchlist</button>
+        </div>
+        <div class="analytics-summary" id="analyticsSummary"></div>
       </div>
       <div class="perf-table-wrap">
         <table class="perf-table" id="perfTable">
@@ -607,7 +647,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.25';
+const APP_BUILD  = '20260317.26';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -1237,6 +1277,13 @@ function clearSym() {
 //  Add Sheet
 // ─────────────────────────────────────────────────────────────────────────────
 let addMode = 'portfolio';
+let analyticsFilter = 'all'; // 'all' | 'portfolio' | 'watchlist'
+function setAnalyticsFilter(f) {
+  analyticsFilter = f;
+  document.querySelectorAll('.af-btn').forEach((btn, i) =>
+    btn.classList.toggle('active', ['all','portfolio','watchlist'][i] === f));
+  renderAnalytics();
+}
 function setAddMode(mode) {
   addMode = mode;
   document.getElementById('addTypePfBtn').classList.toggle('active', mode === 'portfolio');
@@ -1831,45 +1878,22 @@ function handleCardClick(id, el) {
 //  Analytics Table
 // ─────────────────────────────────────────────────────────────────────────────
 function renderAnalytics() {
-  const tbody = document.getElementById('perfTableBody');
+  const tbody   = document.getElementById('perfTableBody');
+  const table   = document.getElementById('perfTable');
+  const sumEl   = document.getElementById('analyticsSummary');
   if (!tbody) return;
 
-  if (portfolio.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:48px 20px">
-      Add holdings to see performance analytics</td></tr>`;
-    updateSortHeaders(); return;
-  }
-
-  function pctCell(v) {
+  // ── Heat-map pct cell: background intensity scales with magnitude ──────────
+  function pctCell(v, cap = 10) {
     if (v == null) return '<span class="pct-na">—</span>';
-    const cls = v >= 0 ? 'pct-pos' : 'pct-neg';
-    return `<span class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
-  }
-
-  function buildRow({ h, d, curVal, pl_pct }) {
-    return `<tr onclick="openDetail(${h.id})">
-      <td>
-        <span class="td-sym">${h.symbol}</span>
-        <span class="td-name">${h.name || ''}</span>
-      </td>
-      <td class="price-cell">${d ? '₹' + d.price.toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
-      <td class="val-cell">${curVal != null ? '₹' + Math.round(curVal).toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
-      <td>${pctCell(d?.pct_1d)}</td>
-      <td>${pctCell(d?.pct_1w)}</td>
-      <td>${pctCell(d?.pct_1m)}</td>
-      <td>${pctCell(d?.pct_3m)}</td>
-      <td>${pctCell(d?.pct_6m)}</td>
-      <td>${pctCell(d?.pct_1y)}</td>
-      <td>${pctCell(d?.div_yield)}</td>
-      <td>${pctCell(pl_pct)}</td>
-    </tr>`;
+    const pos  = v >= 0;
+    const heat = Math.max(0.06, Math.min(Math.abs(v) / cap, 1) * 0.22 + 0.04).toFixed(2);
+    return `<span class="pct-${pos ? 'pos' : 'neg'} heat" style="--heat:${heat}">${pos ? '+' : ''}${v.toFixed(1)}%</span>`;
   }
 
   function makeRow(h) {
     const d = liveData[h.yf_symbol];
-    if (h.watch) {
-      return { h, d, curVal: null, pl_pct: null };
-    }
+    if (h.watch) return { h, d, curVal: null, pl_pct: null };
     const invested = h.buy_price * h.qty;
     const curVal   = d ? d.price * h.qty : null;
     const pl_pct   = curVal != null && invested ? (curVal - invested) / invested * 100 : null;
@@ -1877,7 +1901,7 @@ function renderAnalytics() {
   }
 
   function sortRows(rows) {
-    return rows.sort((a, b) => {
+    return rows.slice().sort((a, b) => {
       if (sortCol === 'symbol') return sortDir * a.h.symbol.localeCompare(b.h.symbol);
       const INF = -Infinity;
       const av = sortCol === 'price' ? (a.d?.price ?? INF) :
@@ -1890,20 +1914,91 @@ function renderAnalytics() {
     });
   }
 
-  const pfRows = sortRows(portfolio.filter(h => !h.watch).map(makeRow));
-  const wlRows = sortRows(portfolio.filter(h => h.watch).map(makeRow));
+  function buildRow({ h, d, curVal, pl_pct }, isWl = false) {
+    const wlTag = isWl ? '<span class="td-wl-tag">W</span>' : '';
+    return `<tr class="${isWl ? 'wl-row' : ''}" onclick="openDetail(${h.id})">
+      <td>
+        <span class="td-sym">${h.symbol}${wlTag}</span>
+        <span class="td-name">${h.name || ''}</span>
+      </td>
+      <td class="price-cell">${d ? '₹' + d.price.toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
+      <td class="val-cell">${curVal != null ? '₹' + Math.round(curVal).toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
+      <td>${pctCell(d?.pct_1d, 5)}</td>
+      <td>${pctCell(d?.pct_1w, 7)}</td>
+      <td>${pctCell(d?.pct_1m, 10)}</td>
+      <td>${pctCell(d?.pct_3m, 15)}</td>
+      <td>${pctCell(d?.pct_6m, 20)}</td>
+      <td>${pctCell(d?.pct_1y, 30)}</td>
+      <td>${pctCell(d?.div_yield, 5)}</td>
+      <td>${pctCell(pl_pct, 30)}</td>
+    </tr>`;
+  }
 
-  const SEP_COLSPAN = 11;
-  let html = pfRows.map(buildRow).join('');
-  if (wlRows.length > 0) {
-    html += `<tr><td colspan="${SEP_COLSPAN}" style="padding:8px 10px;background:var(--bg2);border-top:1px solid var(--border)">
-      <span style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em">Watchlist</span>
-    </td></tr>`;
-    html += wlRows.map(buildRow).join('');
+  // ── Apply / remove watchlist column-hiding class ───────────────────────────
+  table.classList.toggle('filter-wl', analyticsFilter === 'watchlist');
+
+  // ── Determine which rows to show based on filter ───────────────────────────
+  const allPf  = portfolio.filter(h => !h.watch).map(makeRow);
+  const allWl  = portfolio.filter(h =>  h.watch).map(makeRow);
+  const pfRows = sortRows(allPf);
+  const wlRows = sortRows(allWl);
+
+  if (portfolio.length === 0 ||
+      (analyticsFilter === 'portfolio' && pfRows.length === 0) ||
+      (analyticsFilter === 'watchlist' && wlRows.length === 0)) {
+    const msg = analyticsFilter === 'watchlist'
+      ? 'No watchlist items yet — tap + and choose Watchlist'
+      : analyticsFilter === 'portfolio'
+      ? 'No portfolio holdings yet — tap + to add'
+      : 'Add holdings or watchlist items to see analytics';
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:48px 20px">${msg}</td></tr>`;
+    updateSortHeaders();
+    if (sumEl) sumEl.innerHTML = '';
+    return;
+  }
+
+  // ── Build table rows ───────────────────────────────────────────────────────
+  let html = '';
+  if (analyticsFilter === 'all') {
+    html += pfRows.map(r => buildRow(r, false)).join('');
+    if (wlRows.length > 0) {
+      html += `<tr class="perf-sep-row"><td colspan="11"><span class="perf-sep-label">Watchlist</span></td></tr>`;
+      html += wlRows.map(r => buildRow(r, true)).join('');
+    }
+  } else if (analyticsFilter === 'portfolio') {
+    html = pfRows.map(r => buildRow(r, false)).join('');
+  } else {
+    html = wlRows.map(r => buildRow(r, true)).join('');
   }
   tbody.innerHTML = html;
-
   updateSortHeaders();
+
+  // ── Summary strip ──────────────────────────────────────────────────────────
+  if (sumEl) {
+    const visRows = analyticsFilter === 'watchlist' ? wlRows :
+                    analyticsFilter === 'portfolio' ? pfRows : allPf;
+    if (analyticsFilter === 'watchlist') {
+      sumEl.innerHTML = `<span class="as-chip"><strong>${wlRows.length}</strong> watching</span>`;
+    } else {
+      let inv = 0, cur = 0, wSum = 0, wPct = 0;
+      visRows.forEach(r => {
+        if (r.invested) { inv += r.invested; cur += r.curVal ?? r.invested; }
+        if (r.curVal && r.d?.pct_1d != null) { wSum += r.curVal; wPct += r.curVal * r.d.pct_1d; }
+      });
+      const pl     = cur - inv;
+      const plPct  = inv ? pl / inv * 100 : 0;
+      const today  = wSum > 0 ? wPct / wSum : null;
+      const plCls  = pl  >= 0 ? 'pos' : 'neg';
+      const todCls = today != null && today >= 0 ? 'pos' : 'neg';
+      const chips = [
+        `<span class="as-chip"><strong>${visRows.length}</strong> stock${visRows.length !== 1 ? 's' : ''}</span>`,
+        inv > 0 ? `<span class="as-chip">Invested <strong>₹${Math.round(inv).toLocaleString('en-IN')}</strong></span>` : null,
+        inv > 0 ? `<span class="as-chip ${plCls}">${pl >= 0 ? '+' : ''}₹${Math.round(pl).toLocaleString('en-IN')} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>` : null,
+        today != null ? `<span class="as-chip ${todCls}">Today ${today >= 0 ? '+' : ''}${today.toFixed(2)}%</span>` : null,
+      ].filter(Boolean);
+      sumEl.innerHTML = chips.join('');
+    }
+  }
 }
 
 function sortTable(col) {
