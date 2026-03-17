@@ -127,9 +127,16 @@
     .card-refresh-btn:hover { opacity:1; color:var(--accent); }
     .card-refresh-btn svg { display:block; }
     .perf-pill { font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; white-space:nowrap; }
-    .perf-pill.pos { background:var(--green-dim); color:var(--green); }
-    .perf-pill.neg { background:var(--red-dim); color:var(--red); }
-    .perf-pill.na  { background:var(--bg3); color:var(--muted); }
+    .perf-pill.pos   { background:var(--green-dim); color:var(--green); }
+    .perf-pill.neg   { background:var(--red-dim); color:var(--red); }
+    .perf-pill.na    { background:var(--bg3); color:var(--muted); }
+    /* L2 — price only (chart blocked, v7/quote fallback used) */
+    .perf-pill.warn  { background:rgba(251,146,60,0.12); color:#f59e0b; }
+    /* L3 — stale cached (fetch failed, showing previous cache) */
+    .perf-pill.stale { opacity:0.55; }
+    .perf-pill.cache-lbl { background:rgba(99,102,241,0.12); color:#a5b4fc; font-style:italic; }
+    /* L4 — no data at all, all retries exhausted */
+    .perf-pill.err   { background:rgba(239,68,68,0.12); color:var(--red); cursor:pointer; }
 
     .pos { color:var(--green); }
     .neg { color:var(--red); }
@@ -565,7 +572,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.19';
+const APP_BUILD  = '20260317.20';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -861,6 +868,7 @@ async function proxyFetch(rawUrl) {
 // ─────────────────────────────────────────────────────────────────────────────
 let portfolio   = loadPortfolio();
 let liveData    = {};          // yf_symbol -> { price, pct_1w, pct_1m, pct_3m, pct_1y }
+const failedSyms = new Set(); // symbols where this session's full refresh exhausted all retries with NO data
 let selectedSym = null;
 let searchTimer = null;
 let sortCol = 'value', sortDir = -1;   // analytics table sort state
@@ -904,7 +912,16 @@ function loadLiveCache() {
   catch { return null; }
 }
 function saveLiveCache() {
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: liveData })); }
+  // Strip session-only flags (_cacheTs, _fetchedAt) before persisting;
+  // keep _quoteOnly so next boot knows percentages were unavailable.
+  const clean = {};
+  for (const [sym, d] of Object.entries(liveData)) {
+    if (!d) continue;
+    // eslint-disable-next-line no-unused-vars
+    const { _cacheTs, _fetchedAt, ...rest } = d;
+    clean[sym] = rest;
+  }
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: clean })); }
   catch {}
 }
 /** Human-readable age string from milliseconds */
@@ -919,49 +936,73 @@ function cacheAgeStr(ageMs) {
 }
 
 /**
- * Update the cache-age banner between action buttons and holdings list.
- * Called on boot, after every refresh, and on visibilitychange.
+ * Update the cache-age banner.
  *
- * States:
- *   cb-ok    — refresh just finished (fades after 4 s)
- *   cb-fresh — < 24 h (informational, green)
- *   cb-warn  — 1–7 days (amber warning, pulsing dot)
- *   cb-stale — > 7 days (red, pulsing dot)
+ * @param {object|boolean} result
+ *   false / omitted  — default: show age-based state
+ *   { ok: n, fail: m } — called after a refresh run:
+ *     ok=0, fail>0  → all proxies failed (red error banner, stays)
+ *     ok>0, fail>0  → partial success (amber, stays with retry)
+ *     ok>0, fail=0  → all good (green "updated just now", fades 4 s)
  */
-function updateCacheBanner(justRefreshed = false) {
+function updateCacheBanner(result = false) {
   const banner  = document.getElementById('cacheBanner');
   const lastUpd = document.getElementById('lastUpdate');
   if (!banner) return;
 
   const cache = loadLiveCache();
-  if (!cache || !cache.ts || !portfolio.length) {
-    banner.style.display = 'none';
+  if (!portfolio.length) { banner.style.display = 'none'; return; }
+
+  // ── Post-refresh result ───────────────────────────────────────────────────
+  if (result && typeof result === 'object') {
+    const { ok, fail } = result;
+    const total = ok + fail;
+
+    if (lastUpd) lastUpd.textContent = ok > 0 ? 'just now' : (cache?.ts ? cacheAgeStr(Date.now() - cache.ts) : '—');
+
+    if (ok > 0 && fail === 0) {
+      // ✓ All symbols updated
+      banner.className = 'cache-banner cb-ok';
+      banner.style.display = '';
+      banner.onclick = null;
+      banner.innerHTML =
+        '<span class="cb-dot"></span>' +
+        `<span class="cb-msg"><strong>Prices updated</strong><span> — all ${total} symbols loaded</span></span>`;
+      setTimeout(() => { banner.style.display = 'none'; }, 4000);
+
+    } else if (ok > 0 && fail > 0) {
+      // ⚠ Partial: some loaded, some failed
+      banner.className = 'cache-banner cb-warn';
+      banner.style.display = '';
+      banner.onclick = () => { if (!isRefreshing) refreshAll('pending'); };
+      banner.innerHTML =
+        '<span class="cb-dot"></span>' +
+        `<span class="cb-msg"><strong>${ok} updated, ${fail} unavailable</strong><span> — proxy errors</span></span>` +
+        '<span class="cb-act">Retry failed →</span>';
+
+    } else {
+      // ✕ All failed — nothing loaded
+      banner.className = 'cache-banner cb-stale';
+      banner.style.display = '';
+      banner.onclick = () => { if (!isRefreshing) refreshAll('all'); };
+      banner.innerHTML =
+        '<span class="cb-dot"></span>' +
+        `<span class="cb-msg"><strong>Refresh failed</strong><span> — all proxies unavailable${cache?.ts ? ', showing data from ' + cacheAgeStr(Date.now() - cache.ts) : ''}</span></span>` +
+        '<span class="cb-act">Retry →</span>';
+    }
     return;
   }
+
+  // ── Age-based state (boot / visibilitychange) ─────────────────────────────
+  if (!cache || !cache.ts) { banner.style.display = 'none'; return; }
 
   const ageMs  = Date.now() - cache.ts;
   const ageStr = cacheAgeStr(ageMs);
   const hours  = ageMs / 3600000;
 
-  // Topbar compact age
   if (lastUpd) lastUpd.textContent = ageStr;
 
-  if (justRefreshed) {
-    // Flash "Updated just now" then hide after 4 s
-    banner.className = 'cache-banner cb-ok';
-    banner.style.display = '';
-    banner.innerHTML =
-      '<span class="cb-dot"></span>' +
-      '<span class="cb-msg"><strong>Prices updated just now</strong></span>';
-    setTimeout(() => { banner.style.display = 'none'; }, 4000);
-    return;
-  }
-
-  if (hours < 1) {
-    // Very fresh — no banner needed
-    banner.style.display = 'none';
-    return;
-  }
+  if (hours < 1) { banner.style.display = 'none'; return; }
 
   let cls, bold, sub, act;
   if (hours < 24) {
@@ -1155,11 +1196,12 @@ function addHolding() {
       if (d) break;
     }
     fetchingSyms.delete(sym);
-    if (d) liveData[sym] = d;
+    if (d) { delete d._cacheTs; liveData[sym] = d; failedSyms.delete(sym); }
+    else { failedSyms.add(sym); }
     portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
     updateSummary();
     saveLiveCache();
-    updateCacheBanner(true);
+    updateCacheBanner({ ok: d ? 1 : 0, fail: d ? 0 : 1 });
     if (document.getElementById('page-heatmap').classList.contains('active')) renderAnalytics();
   })();
 }
@@ -1271,12 +1313,19 @@ async function refreshAll(mode = 'all') {
 
       const d = await fetchLive(sym);
       fetchingSyms.delete(sym);
-      if (d) liveData[sym] = d;
+      if (d) {
+        delete d._cacheTs;   // mark as freshly fetched this session
+        liveData[sym] = d;
+        failedSyms.delete(sym);
+      }
 
       portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
       updateSummary();
     }
   };
+
+  // Clear stale failure flags for symbols we're about to retry
+  toFetch.forEach(s => failedSyms.delete(s));
 
   // ── Main pass ──
   await runPass(toFetch, '');
@@ -1293,8 +1342,12 @@ async function refreshAll(mode = 'all') {
   }
 
   if (!refreshAbort) {
+    // Mark any symbol still without data as definitively failed (L4)
+    const stillFailed = toFetch.filter(s => !liveData[s]);
+    stillFailed.forEach(s => failedSyms.add(s));
+    const okCount   = toFetch.length - stillFailed.length;
     saveLiveCache();
-    updateCacheBanner(true); // flash "Updated just now" + update topbar
+    updateCacheBanner({ ok: okCount, fail: stillFailed.length }); // accurate result banner
   }
 
   isRefreshing = false;
@@ -1340,7 +1393,8 @@ async function refreshOne(yfSym, evt) {
 
   const d = await fetchLive(yfSym);
   fetchingSyms.delete(yfSym);
-  if (d) liveData[yfSym] = d;
+  if (d) { delete d._cacheTs; liveData[yfSym] = d; failedSyms.delete(yfSym); }
+  else    { failedSyms.add(yfSym); }
 
   portfolio.filter(h => h.yf_symbol === yfSym).forEach(h => {
     updateCard(h.id);
@@ -1350,7 +1404,7 @@ async function refreshOne(yfSym, evt) {
   updateSummary();
   updateRetryBtn();
   saveLiveCache();
-  updateCacheBanner(true);
+  updateCacheBanner({ ok: d ? 1 : 0, fail: d ? 0 : 1 });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1387,18 +1441,42 @@ function renderPortfolio() {
 
     let pills;
     if (isSgb(h.yf_symbol)) {
+      // ── SGB: not supported by Yahoo Finance ──────────────────────────────
       pills = '<span class="perf-pill na" title="Sovereign Gold Bonds are not supported by Yahoo Finance">SGB · not supported</span>';
-    } else if (d) {
+
+    } else if (fetchingSyms.has(h.yf_symbol)) {
+      // ── Actively fetching right now ──────────────────────────────────────
+      pills = '<span class="perf-pill na">⟳ Fetching…</span>';
+
+    } else if (d && !d._cacheTs) {
+      // ── L1 / L2: Fresh data fetched this session ─────────────────────────
       pills = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
         .map(([lbl, v]) => v == null
           ? `<span class="perf-pill na">${lbl} —</span>`
           : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
         .join('');
-      if (d._quoteOnly) pills += '<span class="perf-pill na" title="Performance data unavailable — proxy returned price only">~ price only</span>';
-    } else if (fetchingSyms.has(h.yf_symbol)) {
-      pills = '<span class="perf-pill na">⟳ Fetching…</span>';
+      if (d._quoteOnly) {
+        // L2: chart was blocked, v7/quote fallback gave price only
+        pills += '<span class="perf-pill warn" title="Chart API blocked by proxy — got price only via fallback. %% will load on next full refresh.">~ price only</span>';
+      }
+
+    } else if (d && d._cacheTs) {
+      // ── L3: Fetch failed this session — showing stale cached data ─────────
+      const ageStr = cacheAgeStr(Date.now() - d._cacheTs);
+      pills = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
+        .map(([lbl, v]) => v == null
+          ? `<span class="perf-pill na stale">${lbl} —</span>`
+          : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'} stale">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
+        .join('');
+      pills += `<span class="perf-pill cache-lbl" title="Live fetch failed — showing cached prices from ${ageStr}">📦 ${ageStr}</span>`;
+
+    } else if (failedSyms.has(h.yf_symbol)) {
+      // ── L4: All retries exhausted, no data at all ────────────────────────
+      pills = `<span class="perf-pill err" onclick="refreshOne('${h.yf_symbol}',event)" title="All proxies failed — tap to retry">✕ Unavailable · Retry ↺</span>`;
+
     } else {
-      pills = '<span class="perf-pill na">— no data</span>';
+      // First open, no cache, not yet fetched
+      pills = '<span class="perf-pill na">— awaiting data</span>';
     }
 
     const initials = h.symbol.replace(/\.(NS|BO)$/i, '').slice(0, 3);
@@ -1988,6 +2066,9 @@ document.getElementById('versionFooter2').textContent = 'StockPulse · Build ' +
   const cache = loadLiveCache();
   if (cache && cache.data) {
     liveData = cache.data;  // always restore — never show blank if we have data
+    // Tag every item as "from cache" so cards can show stale indicators until fresh fetch
+    const ts = cache.ts || Date.now();
+    Object.values(liveData).forEach(d => { if (d) d._cacheTs = ts; });
   }
   renderPortfolio();
   updateRetryBtn();
