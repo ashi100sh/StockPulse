@@ -572,7 +572,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.20';
+const APP_BUILD  = '20260317.21';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -1295,6 +1295,9 @@ async function refreshAll(mode = 'all') {
 
   isRefreshing = true;
   refreshAbort = false;
+  // For pending-only retries: clear proxy cache so we race all proxies fresh
+  // rather than re-hitting the recently-throttled winner from the previous run.
+  if (mode === 'pending') localStorage.removeItem(PROXY_CACHE_KEY);
   updateRetryBtn(); // hide Retry button while refresh is running
   const btn = document.getElementById('refreshBtn');
 
@@ -1331,13 +1334,16 @@ async function refreshAll(mode = 'all') {
   await runPass(toFetch, '');
 
   // ── Retry rounds for symbols that returned null ──
-  // Delays: 2 s → 5 s → 10 s (up to 3 rounds)
-  const retryDelays = [2000, 5000, 10000];
+  // Longer delays give proxy rate limits time to reset between rounds.
+  // Proxy cache is cleared before each round so we don't keep hammering
+  // the recently-throttled winner from the main pass.
+  const retryDelays = [8000, 20000, 40000];
   let failed = toFetch.filter(s => !liveData[s]);
   for (let round = 0; round < retryDelays.length && failed.length && !refreshAbort; round++) {
     btn.innerHTML = SPIN_ICO + ` ↺ ${failed.length}…`;
     await new Promise(r => setTimeout(r, retryDelays[round]));
-    await runPass(failed, '↺ ');   // cleaner: "↺ 3/6" not "↺1 3/6"
+    localStorage.removeItem(PROXY_CACHE_KEY); // race all proxies fresh — avoid the throttled one
+    await runPass(failed, '↺ ');
     failed = failed.filter(s => !liveData[s]);
   }
 
@@ -1381,6 +1387,10 @@ function updateRetryBtn() {
 async function refreshOne(yfSym, evt) {
   if (evt) evt.stopPropagation(); // prevent card click
   if (fetchingSyms.has(yfSym) || isSgb(yfSym)) return;
+
+  // Clear proxy cache so we race all proxies fresh instead of re-hitting
+  // the recently-throttled winner from the batch run.
+  localStorage.removeItem(PROXY_CACHE_KEY);
 
   fetchingSyms.add(yfSym);
   // Mark only the perf area as fetching; price stays as-is
