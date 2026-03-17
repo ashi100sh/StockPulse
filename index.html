@@ -524,7 +524,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD = '20260317.4';
+const APP_BUILD = '20260317.5';
+
+// Yahoo Finance uses 'NSI' internally for NSE India — map to friendly labels
+const EXCH_DISPLAY = { NSI: 'NSE', BOM: 'BSE' };
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Constants & Symbol helpers
@@ -657,15 +660,16 @@ async function searchSymbols(q) {
       results.innerHTML = '<div class="result-item"><span style="color:var(--muted)">No results found</span></div>';
     } else {
       results.innerHTML = quotes.map(q => {
-        const exch = q.exchange || q.quoteType || '';
-        const indian = isIndian(q);
-        const sym = displaySym(q.symbol);
+        const exch     = q.exchange || q.quoteType || '';
+        const exchDisp = EXCH_DISPLAY[exch] || exch;   // NSI→NSE, BOM→BSE
+        const indian   = isIndian(q);
+        const sym      = displaySym(q.symbol);
         return `<div class="result-item" onclick="selectSym('${esc(q.symbol)}','${esc(q.shortname||q.longname||q.symbol)}','${esc(exch)}')">
           <div style="flex:1;min-width:0">
             <div class="result-sym">${sym}</div>
             <div class="result-name">${q.shortname || q.longname || ''}</div>
           </div>
-          <span class="result-exch ${indian ? '' : 'foreign'}">${exch}</span>
+          <span class="result-exch ${indian ? '' : 'foreign'}">${exchDisp}</span>
         </div>`;
       }).join('');
     }
@@ -686,7 +690,7 @@ function selectSym(symbol, name, exchange) {
   document.getElementById('symSearch').value = '';
   document.getElementById('searchResults').classList.remove('show');
   document.getElementById('selSymText').textContent = selectedSym.symbol;
-  document.getElementById('selNameText').textContent = name + (exchange ? ' · ' + exchange : '');
+  document.getElementById('selNameText').textContent = name + (exchange ? ' · ' + (EXCH_DISPLAY[exchange] || exchange) : '');
   document.getElementById('selectedSym').classList.add('show');
   document.getElementById('addBtn').disabled = false;
 }
@@ -1057,7 +1061,7 @@ function openDetail(id) {
     </div>
     <div class="detail-header">
       <div class="detail-sym">${h.symbol}</div>
-      <div class="detail-name">${h.name || ''} · ${h.exchange || ''}</div>
+      <div class="detail-name">${h.name || ''} · ${EXCH_DISPLAY[h.exchange] || h.exchange || ''}</div>
       <div class="detail-price">${d ? fmtC(d.price) : '—'}</div>
       <div class="detail-pl ${pl >= 0 ? 'pos' : 'neg'}">
         ${pl >= 0 ? '+' : ''}${fmtC(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%)
