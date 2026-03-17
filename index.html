@@ -341,6 +341,18 @@
                        border-bottom:none; }
     .perf-sep-label { font-size:10px; font-weight:700; color:var(--muted);
                       text-transform:uppercase; letter-spacing:0.1em; }
+    /* Watchlist sub-header row (independent sort within watchlist section) */
+    .wl-header-row td { background:var(--bg3); padding:7px 10px; font-size:9px; font-weight:700;
+                        color:var(--muted); text-transform:uppercase; letter-spacing:0.06em;
+                        text-align:right; cursor:pointer; white-space:nowrap; user-select:none;
+                        border-bottom:1px solid var(--border); transition:color 0.15s; }
+    .wl-header-row td:first-child { text-align:left; padding-left:16px; }
+    .wl-header-row td:last-child  { padding-right:16px; }
+    .wl-header-row td:hover { color:var(--text); }
+    .wl-header-row td.wl-sort-asc  { color:var(--accent); }
+    .wl-header-row td.wl-sort-asc::after  { content:' ↑'; }
+    .wl-header-row td.wl-sort-desc { color:var(--accent); }
+    .wl-header-row td.wl-sort-desc::after { content:' ↓'; }
     .td-sym  { font-weight:800; font-size:13px; display:block; letter-spacing:-0.3px; }
     .td-name { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden;
                text-overflow:ellipsis; max-width:110px; display:block; margin-top:2px; }
@@ -647,7 +659,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.26';
+const APP_BUILD  = '20260317.27';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -1004,7 +1016,8 @@ let liveData    = {};          // yf_symbol -> { price, pct_1w, pct_1m, pct_3m, 
 const failedSyms = new Set(); // symbols where this session's full refresh exhausted all retries with NO data
 let selectedSym = null;
 let searchTimer = null;
-let sortCol = 'value', sortDir = -1;   // analytics table sort state
+let sortCol = 'value', sortDir = -1;       // portfolio sort state
+let wlSortCol = 'symbol', wlSortDir = -1; // watchlist independent sort state
 let isRefreshing = false;              // true while sequential refresh is running
 let refreshAbort = false;              // set to true to stop in-progress refresh
 const fetchingSyms = new Set();        // yf_symbols currently being fetched
@@ -1900,17 +1913,17 @@ function renderAnalytics() {
     return { h, d, invested, curVal, pl_pct };
   }
 
-  function sortRows(rows) {
+  function sortRows(rows, col, dir) {
     return rows.slice().sort((a, b) => {
-      if (sortCol === 'symbol') return sortDir * a.h.symbol.localeCompare(b.h.symbol);
+      if (col === 'symbol') return dir * a.h.symbol.localeCompare(b.h.symbol);
       const INF = -Infinity;
-      const av = sortCol === 'price' ? (a.d?.price ?? INF) :
-                 sortCol === 'value' ? (a.curVal ?? INF) :
-                 sortCol === 'pl_pct' ? (a.pl_pct ?? INF) : (a.d?.[sortCol] ?? INF);
-      const bv = sortCol === 'price' ? (b.d?.price ?? INF) :
-                 sortCol === 'value' ? (b.curVal ?? INF) :
-                 sortCol === 'pl_pct' ? (b.pl_pct ?? INF) : (b.d?.[sortCol] ?? INF);
-      return sortDir * (av - bv);
+      const av = col === 'price' ? (a.d?.price ?? INF) :
+                 col === 'value' ? (a.curVal ?? INF) :
+                 col === 'pl_pct' ? (a.pl_pct ?? INF) : (a.d?.[col] ?? INF);
+      const bv = col === 'price' ? (b.d?.price ?? INF) :
+                 col === 'value' ? (b.curVal ?? INF) :
+                 col === 'pl_pct' ? (b.pl_pct ?? INF) : (b.d?.[col] ?? INF);
+      return dir * (av - bv);
     });
   }
 
@@ -1940,8 +1953,8 @@ function renderAnalytics() {
   // ── Determine which rows to show based on filter ───────────────────────────
   const allPf  = portfolio.filter(h => !h.watch).map(makeRow);
   const allWl  = portfolio.filter(h =>  h.watch).map(makeRow);
-  const pfRows = sortRows(allPf);
-  const wlRows = sortRows(allWl);
+  const pfRows = sortRows(allPf, sortCol,   sortDir);
+  const wlRows = sortRows(allWl, wlSortCol, wlSortDir);
 
   if (portfolio.length === 0 ||
       (analyticsFilter === 'portfolio' && pfRows.length === 0) ||
@@ -1962,7 +1975,15 @@ function renderAnalytics() {
   if (analyticsFilter === 'all') {
     html += pfRows.map(r => buildRow(r, false)).join('');
     if (wlRows.length > 0) {
+      const WL_COLS = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','div_yield','pl_pct'];
+      const WL_LABELS = ['Stock','Price','Value','1D%','1W%','1M%','3M%','6M%','1Y%','Div%','P&L%'];
+      const wlSubHeader = WL_COLS.map((c, i) => {
+        const isSorted = wlSortCol === c;
+        const cls = isSorted ? (wlSortDir === 1 ? 'wl-sort-asc' : 'wl-sort-desc') : '';
+        return `<td class="${cls}" onclick="sortWatchlist('${c}')">${WL_LABELS[i]}</td>`;
+      }).join('');
       html += `<tr class="perf-sep-row"><td colspan="11"><span class="perf-sep-label">Watchlist</span></td></tr>`;
+      html += `<tr class="wl-header-row">${wlSubHeader}</tr>`;
       html += wlRows.map(r => buildRow(r, true)).join('');
     }
   } else if (analyticsFilter === 'portfolio') {
@@ -2004,6 +2025,11 @@ function renderAnalytics() {
 function sortTable(col) {
   sortDir = sortCol === col ? -sortDir : -1;
   sortCol = col;
+  renderAnalytics();
+}
+function sortWatchlist(col) {
+  wlSortDir = wlSortCol === col ? -wlSortDir : -1;
+  wlSortCol = col;
   renderAnalytics();
 }
 
