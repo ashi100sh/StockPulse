@@ -556,52 +556,63 @@ function normalizeYfSymbol(raw, exchange) {
 function displaySym(s) { return (s || '').replace(/\.(NS|BO)$/i, ''); }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CORS Proxies — raced in parallel; first success wins
+//  CORS Proxies — raced in parallel; first valid response wins
 // ─────────────────────────────────────────────────────────────────────────────
 const PROXY_DEFS = [
-  // allorigins /get — wraps response in JSON { contents: "..." }
+  // corsproxy.io — most reliable free proxy (note: .io, not .org)
+  {
+    make: u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+    extract: async r => r.text()
+  },
+  // allorigins /get — wraps in JSON { contents: "..." }
   {
     make: u => 'https://api.allorigins.win/get?url=' + encodeURIComponent(u),
     extract: async r => { const d = await r.json(); if (!d.contents) throw new Error('empty'); return d.contents; }
   },
-  // thingproxy — simple pass-through
-  {
-    make: u => 'https://thingproxy.freeboard.io/fetch/' + encodeURIComponent(u),
-    extract: async r => r.text()
-  },
-  // corsproxy.org — pass-through
-  {
-    make: u => 'https://corsproxy.org/?' + encodeURIComponent(u),
-    extract: async r => r.text()
-  },
-  // codetabs — pass-through
-  {
-    make: u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
-    extract: async r => r.text()
-  },
-  // allorigins /raw — direct response
+  // allorigins /raw — direct pass-through
   {
     make: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
     extract: async r => r.text()
   },
+  // cors.sh — secondary fallback
+  {
+    make: u => 'https://proxy.cors.sh/' + u,
+    extract: async r => r.text()
+  },
+  // corsproxy.org — last resort
+  {
+    make: u => 'https://corsproxy.org/?' + encodeURIComponent(u),
+    extract: async r => r.text()
+  },
 ];
 
+const PROXY_TIMEOUT_MS = 7000; // abort any proxy that doesn't respond within 7s
+
 async function proxyFetch(rawUrl) {
-  // Race all proxies simultaneously — fastest valid response wins.
-  // AbortControllers let us cancel the remaining in-flight requests.
   const controllers = PROXY_DEFS.map(() => new AbortController());
 
+  // Auto-abort each request after PROXY_TIMEOUT_MS so hanging proxies
+  // don't keep Promise.any waiting forever
+  const timers = controllers.map(c =>
+    setTimeout(() => c.abort(), PROXY_TIMEOUT_MS)
+  );
+
   const attempts = PROXY_DEFS.map(async ({ make, extract }, i) => {
-    const res = await fetch(make(rawUrl), {
-      signal: controllers[i].signal,
-      cache: 'no-store',
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const text = await extract(res);
-    if (!text) throw new Error('empty response');
-    // Cancel all other in-flight requests
-    controllers.forEach((c, j) => { if (j !== i) c.abort(); });
-    return new Response(text, { headers: { 'Content-Type': 'application/json' } });
+    try {
+      const res = await fetch(make(rawUrl), {
+        signal: controllers[i].signal,
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const text = await extract(res);
+      if (!text) throw new Error('empty response');
+      // Cancel remaining in-flight requests
+      controllers.forEach((c, j) => { if (j !== i) c.abort(); });
+      timers.forEach(clearTimeout);
+      return new Response(text, { headers: { 'Content-Type': 'application/json' } });
+    } finally {
+      clearTimeout(timers[i]);
+    }
   });
 
   try {
@@ -723,7 +734,25 @@ async function searchSymbols(q) {
     }
     results.classList.add('show');
   } catch {
-    results.innerHTML = '<div class="result-item"><span style="color:var(--muted)">Search failed — check connection</span></div>';
+    // All proxies failed — offer "use typed symbol directly" so the user
+    // isn't completely blocked from adding a holding
+    const typed = document.getElementById('symSearch').value.trim().toUpperCase();
+    if (typed) {
+      results.innerHTML = `
+        <div class="result-item" style="flex-direction:column;gap:6px;align-items:flex-start">
+          <span style="color:var(--muted);font-size:12px">Search unavailable (proxy error). Add directly:</span>
+        </div>
+        <div class="result-item" onclick="selectSym('${esc(typed + '.NS')}','${esc(typed)}','NSI')">
+          <div style="flex:1"><div class="result-sym">${typed}</div><div class="result-name">Add as NSE stock</div></div>
+          <span class="result-exch">NSE</span>
+        </div>
+        <div class="result-item" onclick="selectSym('${esc(typed + '.BO')}','${esc(typed)}','BOM')">
+          <div style="flex:1"><div class="result-sym">${typed}</div><div class="result-name">Add as BSE stock</div></div>
+          <span class="result-exch">BSE</span>
+        </div>`;
+    } else {
+      results.innerHTML = '<div class="result-item"><span style="color:var(--muted)">Search unavailable — type a symbol and try again</span></div>';
+    }
     results.classList.add('show');
   } finally {
     spinner.classList.remove('on');
