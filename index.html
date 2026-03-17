@@ -134,6 +134,30 @@
     .pos { color:var(--green); }
     .neg { color:var(--red); }
 
+    /* ── Cache banner ── */
+    .cache-banner { display:flex; align-items:center; gap:10px; margin:0 16px 10px;
+      padding:9px 14px; border-radius:10px; font-size:12px; cursor:pointer;
+      user-select:none; transition:opacity 0.3s; }
+    .cache-banner.cb-fresh { background:rgba(34,197,94,0.10); }
+    .cache-banner.cb-warn  { background:rgba(251,146,60,0.13); }
+    .cache-banner.cb-stale { background:rgba(239,68,68,0.12); }
+    .cache-banner.cb-ok    { background:rgba(34,197,94,0.13); }
+    .cb-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+    .cache-banner.cb-fresh .cb-dot { background:#22c55e; }
+    .cache-banner.cb-warn  .cb-dot { background:#fb923c; animation:pulse 1.6s ease-in-out infinite; }
+    .cache-banner.cb-stale .cb-dot { background:var(--red); animation:pulse 1.2s ease-in-out infinite; }
+    .cache-banner.cb-ok    .cb-dot { background:#22c55e; }
+    .cb-msg  { flex:1; line-height:1.4; }
+    .cb-msg strong { font-weight:700; }
+    .cb-msg span   { color:var(--muted); }
+    .cb-act  { font-size:11px; font-weight:700; white-space:nowrap; padding:3px 8px;
+               border-radius:6px; background:rgba(255,255,255,0.08); }
+    .cache-banner.cb-fresh .cb-act { color:#22c55e; }
+    .cache-banner.cb-warn  .cb-act { color:#fb923c; }
+    .cache-banner.cb-stale .cb-act { color:var(--red); }
+    .cache-banner.cb-ok    .cb-act { color:#22c55e; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
     /* ── Empty state ── */
     .empty-state { text-align:center; padding:64px 20px; color:var(--muted); }
     .empty-state .icon { font-size:52px; margin-bottom:14px; }
@@ -398,6 +422,9 @@
         <input type="file" id="csvInput" accept=".csv,.tsv,.xls,.xlsx" style="display:none" onchange="importCSV(this)" />
       </div>
 
+      <!-- Cache age banner — shown between action row and holdings list -->
+      <div id="cacheBanner" style="display:none"></div>
+
       <div class="section-header">
         <span class="section-title">Holdings</span>
         <span class="swipe-hint-txt">
@@ -539,7 +566,7 @@
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
 const APP_BUILD  = '20260317.18';
-const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
+const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
 const SPIN_ICO    = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.7s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>`;
@@ -855,9 +882,89 @@ function saveLiveCache() {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: liveData })); }
   catch {}
 }
-function isCacheStale() {
-  const c = loadLiveCache();
-  return !c || !c.ts || (Date.now() - c.ts) > STALE_MS;
+/** Human-readable age string from milliseconds */
+function cacheAgeStr(ageMs) {
+  const m = Math.floor(ageMs / 60000);
+  if (m <  1)   return 'just now';
+  if (m < 60)   return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)   return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d !== 1 ? 's' : ''} ago`;
+}
+
+/**
+ * Update the cache-age banner between action buttons and holdings list.
+ * Called on boot, after every refresh, and on visibilitychange.
+ *
+ * States:
+ *   cb-ok    — refresh just finished (fades after 4 s)
+ *   cb-fresh — < 24 h (informational, green)
+ *   cb-warn  — 1–7 days (amber warning, pulsing dot)
+ *   cb-stale — > 7 days (red, pulsing dot)
+ */
+function updateCacheBanner(justRefreshed = false) {
+  const banner  = document.getElementById('cacheBanner');
+  const lastUpd = document.getElementById('lastUpdate');
+  if (!banner) return;
+
+  const cache = loadLiveCache();
+  if (!cache || !cache.ts || !portfolio.length) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  const ageMs  = Date.now() - cache.ts;
+  const ageStr = cacheAgeStr(ageMs);
+  const hours  = ageMs / 3600000;
+
+  // Topbar compact age
+  if (lastUpd) lastUpd.textContent = ageStr;
+
+  if (justRefreshed) {
+    // Flash "Updated just now" then hide after 4 s
+    banner.className = 'cache-banner cb-ok';
+    banner.style.display = '';
+    banner.innerHTML =
+      '<span class="cb-dot"></span>' +
+      '<span class="cb-msg"><strong>Prices updated just now</strong></span>';
+    setTimeout(() => { banner.style.display = 'none'; }, 4000);
+    return;
+  }
+
+  if (hours < 1) {
+    // Very fresh — no banner needed
+    banner.style.display = 'none';
+    return;
+  }
+
+  let cls, bold, sub, act;
+  if (hours < 24) {
+    cls  = 'cb-fresh';
+    bold = `Cached prices from ${ageStr}`;
+    sub  = ' — tap to refresh';
+    act  = 'Refresh';
+  } else if (hours < 24 * 7) {
+    const d = Math.floor(hours / 24);
+    cls  = 'cb-warn';
+    bold = `Prices are ${d} day${d !== 1 ? 's' : ''} old`;
+    sub  = ' — may be outdated';
+    act  = 'Refresh now';
+  } else {
+    const d = Math.floor(hours / 24);
+    cls  = 'cb-stale';
+    bold = `Prices are ${d} days old`;
+    sub  = ' — significantly outdated';
+    act  = 'Refresh now';
+  }
+
+  banner.className = `cache-banner ${cls}`;
+  banner.style.display = '';
+  banner.onclick = () => { if (!isRefreshing) refreshAll('all'); };
+  banner.innerHTML =
+    `<span class="cb-dot"></span>` +
+    `<span class="cb-msg"><strong>${bold}</strong><span>${sub}</span></span>` +
+    `<span class="cb-act">${act} →</span>`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1027,6 +1134,7 @@ function addHolding() {
     portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
     updateSummary();
     saveLiveCache();
+    updateCacheBanner(true);
     if (document.getElementById('page-heatmap').classList.contains('active')) renderAnalytics();
   })();
 }
@@ -1133,8 +1241,7 @@ async function refreshAll(mode = 'all') {
 
   if (!refreshAbort) {
     saveLiveCache();
-    document.getElementById('lastUpdate').textContent =
-      new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    updateCacheBanner(true); // flash "Updated just now" + update topbar
   }
 
   isRefreshing = false;
@@ -1190,6 +1297,7 @@ async function refreshOne(yfSym, evt) {
   updateSummary();
   updateRetryBtn();
   saveLiveCache();
+  updateCacheBanner(true);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1821,30 +1929,31 @@ document.getElementById('buildBadge').textContent    = 'b' + APP_BUILD;
 document.getElementById('versionFooter').textContent  = 'StockPulse · Build ' + APP_BUILD;
 document.getElementById('versionFooter2').textContent = 'StockPulse · Build ' + APP_BUILD;
 
-// ── Smart startup: restore cached prices instantly, then only refresh if stale ──
+// ── Smart startup: restore cached prices instantly, then only refresh if > 24 h old ──
 (function boot() {
   const cache = loadLiveCache();
   if (cache && cache.data) {
-    liveData = cache.data;
-    // Show cache age in topbar
-    if (cache.ts) {
-      const ageMs = Date.now() - cache.ts;
-      const m = Math.floor(ageMs / 60000);
-      document.getElementById('lastUpdate').textContent =
-        m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
-    }
+    liveData = cache.data;  // always restore — never show blank if we have data
   }
   renderPortfolio();
   updateRetryBtn();
-  if (portfolio.length > 0 && isCacheStale()) {
-    refreshAll('all'); // background sequential refresh — stale or first open
+  updateCacheBanner();      // show age banner (or nothing if very fresh)
+
+  // Auto-refresh only when cache is older than 24 h; otherwise user decides
+  const cacheAge = (cache && cache.ts) ? Date.now() - cache.ts : Infinity;
+  if (portfolio.length > 0 && cacheAge > AUTO_REFRESH_MS) {
+    refreshAll('all');      // background refresh — data is a day+ old
   }
 })();
 
 // Re-check on PWA foreground resume (e.g. user comes back after hours)
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden && portfolio.length > 0 && !isRefreshing && isCacheStale()) {
-    refreshAll('all');
+  if (document.hidden) return;
+  updateCacheBanner(); // always refresh banner text when tab becomes visible
+  const cache   = loadLiveCache();
+  const cacheAge = (cache && cache.ts) ? Date.now() - cache.ts : Infinity;
+  if (portfolio.length > 0 && !isRefreshing && cacheAge > AUTO_REFRESH_MS) {
+    refreshAll('all'); // auto-refresh only when 24 h+ old
   }
 });
 </script>
