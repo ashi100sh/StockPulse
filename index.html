@@ -538,7 +538,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.17';
+const APP_BUILD  = '20260317.18';
 const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -733,9 +733,24 @@ const PROXY_DEFS = [
     make: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
     extract: async r => r.text()
   },
+  // codetabs — reliable free CORS proxy
+  {
+    make: u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+    extract: async r => r.text()
+  },
+  // thingproxy — alternative free proxy
+  {
+    make: u => 'https://thingproxy.freeboard.io/fetch/' + u,
+    extract: async r => r.text()
+  },
+  // query2 mirror — Yahoo Finance sometimes responds on query2 when query1 blocks
+  {
+    make: u => 'https://corsproxy.io/?' + encodeURIComponent(u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com')),
+    extract: async r => r.text()
+  },
 ];
 
-const PROXY_TIMEOUT_MS = 7000;
+const PROXY_TIMEOUT_MS = 10000;
 const PROXY_CACHE_KEY  = 'sp_proxy_idx'; // localStorage: last-known-working proxy index
 
 /** Try a single proxy by index; resolves with Response or rejects. */
@@ -784,6 +799,7 @@ async function proxyFetch(rawUrl) {
   try {
     return await Promise.any(attempts);
   } catch {
+    localStorage.removeItem(PROXY_CACHE_KEY); // clear stale cache so next call races fresh
     throw new Error('All proxies failed');
   }
 }
@@ -1109,9 +1125,9 @@ async function refreshAll(mode = 'all') {
   const retryDelays = [2000, 5000, 10000];
   let failed = toFetch.filter(s => !liveData[s]);
   for (let round = 0; round < retryDelays.length && failed.length && !refreshAbort; round++) {
-    btn.innerHTML = SPIN_ICO + ` ↺ ${failed.length} pending…`;
+    btn.innerHTML = SPIN_ICO + ` ↺ ${failed.length}…`;
     await new Promise(r => setTimeout(r, retryDelays[round]));
-    await runPass(failed, `↺${round + 1} `);
+    await runPass(failed, '↺ ');   // cleaner: "↺ 3/6" not "↺1 3/6"
     failed = failed.filter(s => !liveData[s]);
   }
 
