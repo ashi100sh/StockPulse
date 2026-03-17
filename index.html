@@ -524,7 +524,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.13';
+const APP_BUILD  = '20260317.14';
 const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -1497,34 +1497,83 @@ function parseCSVRow(line) {
   return cols;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Broker CSV profiles
+//  Each profile: { label, detect(headers)→bool, map: { field: 'exact header' | null } }
+//  map keys: symbol*, buy_price*, qty*, exchange, name, buy_date   (* required)
+//  null → column absent; use defaultExchange / derive from symbol field
+// ─────────────────────────────────────────────────────────────────────────────
+const BROKER_PROFILES = [
+  {
+    label: 'Zerodha',
+    // Zerodha holdings export: Instrument | Qty. | Avg. cost | LTP | Invested | Cur. val | P&L | Net chg. | Day chg.
+    detect: hs => hs.includes('instrument') && hs.includes('avg. cost'),
+    map: { symbol: 'instrument', qty: 'qty.', buy_price: 'avg. cost',
+           exchange: null, name: null, buy_date: null },
+    defaultExchange: 'NSE',
+  },
+  // ── Add new brokers below; pattern: detect unique header combo, map columns ──
+  // {
+  //   label: 'Groww',
+  //   detect: hs => hs.includes('stock symbol') && hs.includes('avg buy price'),
+  //   map: { symbol: 'stock symbol', qty: 'quantity', buy_price: 'avg buy price',
+  //          exchange: null, name: 'stock name', buy_date: null },
+  //   defaultExchange: 'NSE',
+  // },
+];
+
+/**
+ * Resolve column indices from a profile map against actual headers array.
+ * Returns { iSym, iBp, iQty, iExch, iName, iDate, defaultExchange }.
+ */
+function resolveProfile(profile, headers) {
+  const idx = col => {
+    const h = profile.map[col];
+    return h ? headers.indexOf(h) : -1;
+  };
+  return {
+    iSym: idx('symbol'), iBp: idx('buy_price'), iQty: idx('qty'),
+    iExch: idx('exchange'), iName: idx('name'),  iDate: idx('buy_date'),
+    defaultExchange: profile.defaultExchange || 'NSE',
+  };
+}
+
+/**
+ * Generic fuzzy fallback: find columns by partial-match on a list of candidates.
+ * Used when no broker profile is detected.
+ */
+function resolveGeneric(headers) {
+  const col = ks => headers.findIndex(h => ks.some(v => h.includes(v)));
+  return {
+    iSym:  col(['instrument', 'tradingsymbol', 'symbol', 'ticker', 'scrip', 'stock']),
+    iBp:   col(['avg. cost', 'avg cost', 'average cost', 'average price', 'avg price',
+                 'buy price', 'purchase price', 'average_price', 'buy_price', 'price']),
+    iQty:  col(['quantity', 'qty', 'shares', 'units']),
+    iExch: col(['exchange', 'exch', 'market']),
+    iName: col(['instrument name', 'company', 'stock name', 'name']),
+    iDate: col(['buy date', 'buy_date', 'purchase date', 'date']),
+    defaultExchange: 'NSE',
+  };
+}
+
 function importCSV(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    // Normalise line endings (Excel uses CRLF) then split
     const lines = e.target.result
       .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
       .split('\n').filter(l => l.trim());
 
-    if (lines.length < 2) {
-      showToast('CSV appears empty or has no data rows'); return;
-    }
+    if (lines.length < 2) { showToast('CSV appears empty or has no data rows'); return; }
 
-    const headers = parseCSVRow(lines[0]).map(h => h.toLowerCase());
-    // col(candidates) → index of first header containing any candidate substring
-    const col = ks => headers.findIndex(h => ks.some(v => h.includes(v)));
+    const headers = parseCSVRow(lines[0]).map(h => h.toLowerCase().trim());
 
-    // Flexible column detection — works with Zerodha, Groww, and hand-made CSVs
-    // Zerodha: Instrument | Qty. | Avg. cost | LTP | Invested | Cur. val | P&L | ...
-    // Groww:   Symbol     | Quantity | Average Buy Price | ...
-    const iSym  = col(['instrument', 'tradingsymbol', 'symbol', 'ticker', 'scrip', 'stock']);
-    const iBp   = col(['avg. cost', 'avg cost', 'average cost', 'average price', 'avg price',
-                        'buy price', 'purchase price', 'average_price', 'buy_price', 'price']);
-    const iQty  = col(['quantity', 'qty', 'shares', 'units']);
-    const iExch = col(['exchange', 'exch', 'market']);
-    const iName = col(['instrument name', 'company', 'stock name', 'name']);
-    const iDate = col(['buy date', 'buy_date', 'purchase date', 'date']);
+    // Auto-detect broker profile; fall back to generic fuzzy matching
+    const profile  = BROKER_PROFILES.find(p => p.detect(headers));
+    const cols_map = profile ? resolveProfile(profile, headers) : resolveGeneric(headers);
+    const { iSym, iBp, iQty, iExch, iName, iDate, defaultExchange } = cols_map;
+    const brokerLabel = profile ? profile.label : 'generic';
 
     if (iSym === -1 || iBp === -1 || iQty === -1) {
       const missing = [iSym === -1 && 'symbol', iBp === -1 && 'price', iQty === -1 && 'quantity']
@@ -1534,13 +1583,13 @@ function importCSV(input) {
 
     let added = 0, skipped = 0;
     for (let i = 1; i < lines.length; i++) {
-      const cols = parseCSVRow(lines[i]);
-      const get  = idx => (idx >= 0 ? (cols[idx] || '').replace(/,/g, '') : ''); // strip thousand-separators
-      const sym  = get(iSym).toUpperCase();
-      const bp   = parseFloat(get(iBp));
-      const qty  = parseFloat(get(iQty));
+      const row = parseCSVRow(lines[i]);
+      const get = idx => (idx >= 0 ? (row[idx] || '').replace(/,/g, '') : '');
+      const sym = get(iSym).toUpperCase();
+      const bp  = parseFloat(get(iBp));
+      const qty = parseFloat(get(iQty));
       if (!sym || isNaN(bp) || bp <= 0 || isNaN(qty) || qty <= 0) { skipped++; continue; }
-      const exch   = iExch >= 0 ? get(iExch).toUpperCase() || 'NSE' : 'NSE';
+      const exch = iExch >= 0 ? get(iExch).toUpperCase() || defaultExchange : defaultExchange;
       portfolio.push({
         id:        Date.now() + i,
         symbol:    sym,
@@ -1557,7 +1606,7 @@ function importCSV(input) {
     savePortfolio();
     input.value = '';
     if (added > 0) {
-      showToast(`Imported ${added} holding${added !== 1 ? 's' : ''}${skipped ? ` (${skipped} skipped)` : ''}`);
+      showToast(`Imported ${added} holding${added !== 1 ? 's' : ''} · ${brokerLabel}${skipped ? ` (${skipped} skipped)` : ''}`);
       refreshAll();
     } else {
       showToast(skipped ? `No valid rows — ${skipped} row${skipped !== 1 ? 's' : ''} skipped` : 'Nothing to import');
