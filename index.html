@@ -524,7 +524,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.11';
+const APP_BUILD  = '20260317.12';
 const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -1478,42 +1478,88 @@ function exportCSV() {
   showToast('CSV exported');
 }
 
+/** Proper RFC-4180 CSV row parser — handles quoted fields with embedded commas/newlines. */
+function parseCSVRow(line) {
+  const cols = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; } // escaped ""
+      else inQ = !inQ;
+    } else if (ch === ',' && !inQ) {
+      cols.push(cur.trim()); cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cols.push(cur.trim());
+  return cols;
+}
+
 function importCSV(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    const lines   = e.target.result.split('\n').filter(l => l.trim());
-    const headers = lines[0].split(',').map(h => h.replace(/"/g, '').trim().toLowerCase());
-    let added = 0;
+    // Normalise line endings (Excel uses CRLF) then split
+    const lines = e.target.result
+      .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+      .split('\n').filter(l => l.trim());
+
+    if (lines.length < 2) {
+      showToast('CSV appears empty or has no data rows'); return;
+    }
+
+    const headers = parseCSVRow(lines[0]).map(h => h.toLowerCase());
+    // col(candidates) → index of first header containing any candidate substring
+    const col = ks => headers.findIndex(h => ks.some(v => h.includes(v)));
+
+    // Flexible column detection — works with Zerodha, Groww, and hand-made CSVs
+    const iSym  = col(['tradingsymbol', 'symbol', 'ticker', 'scrip']);
+    const iBp   = col(['average price', 'avg price', 'buy price', 'purchase price',
+                        'average_price', 'buy_price', 'price']);
+    const iQty  = col(['quantity', 'qty', 'shares', 'units']);
+    const iExch = col(['exchange', 'exch', 'market']);
+    const iName = col(['instrument name', 'company', 'stock name', 'name']);
+    const iDate = col(['buy date', 'buy_date', 'purchase date', 'date']);
+
+    if (iSym === -1 || iBp === -1 || iQty === -1) {
+      const missing = [iSym === -1 && 'symbol', iBp === -1 && 'price', iQty === -1 && 'quantity']
+        .filter(Boolean).join(', ');
+      showToast(`CSV missing columns: ${missing}`); return;
+    }
+
+    let added = 0, skipped = 0;
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].split(',').map(c => c.replace(/"/g, '').trim());
-      const row  = {};
-      headers.forEach((h, idx) => row[h] = cols[idx] || '');
-      // Support Zerodha (tradingsymbol) and Groww (symbol) formats
-      const sym  = (row['symbol'] || row['tradingsymbol'] || '').toUpperCase().trim();
-      const bp   = parseFloat(row['buy price'] || row['buy_price'] ||
-                               row['average price'] || row['average_price'] || 0);
-      const qty  = parseFloat(row['quantity'] || row['qty'] || 0);
-      if (!sym || !bp || !qty) continue;
-      const exch    = (row['exchange'] || 'NSE').toUpperCase();
-      const yf_sym  = normalizeYfSymbol(sym, exch);
+      const cols = parseCSVRow(lines[i]);
+      const get  = idx => (idx >= 0 ? (cols[idx] || '').replace(/,/g, '') : ''); // strip thousand-separators
+      const sym  = get(iSym).toUpperCase();
+      const bp   = parseFloat(get(iBp));
+      const qty  = parseFloat(get(iQty));
+      if (!sym || isNaN(bp) || bp <= 0 || isNaN(qty) || qty <= 0) { skipped++; continue; }
+      const exch   = iExch >= 0 ? get(iExch).toUpperCase() || 'NSE' : 'NSE';
       portfolio.push({
         id:        Date.now() + i,
         symbol:    sym,
-        yf_symbol: yf_sym,
-        name:      row['name'] || row['instrument name'] || sym,
+        yf_symbol: normalizeYfSymbol(sym, exch),
+        name:      iName >= 0 ? get(iName) || sym : sym,
         exchange:  exch,
         buy_price: bp,
         qty,
-        buy_date:  row['buy date'] || row['buy_date'] || '',
+        buy_date:  iDate >= 0 ? get(iDate) : '',
       });
       added++;
     }
+
     savePortfolio();
     input.value = '';
-    showToast(`Imported ${added} holding${added !== 1 ? 's' : ''}`);
-    if (added > 0) refreshAll();
+    if (added > 0) {
+      showToast(`Imported ${added} holding${added !== 1 ? 's' : ''}${skipped ? ` (${skipped} skipped)` : ''}`);
+      refreshAll();
+    } else {
+      showToast(skipped ? `No valid rows — ${skipped} row${skipped !== 1 ? 's' : ''} skipped` : 'Nothing to import');
+    }
   };
   reader.readAsText(file);
 }
