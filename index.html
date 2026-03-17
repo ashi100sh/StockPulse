@@ -524,7 +524,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.8';
+const APP_BUILD  = '20260317.9';
 const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -554,6 +554,135 @@ function normalizeYfSymbol(raw, exchange) {
 
 /** Strip .NS / .BO suffix for display */
 function displaySym(s) { return (s || '').replace(/\.(NS|BO)$/i, ''); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Indian stock name → NSE ticker mapping (used when search proxy is down)
+// ─────────────────────────────────────────────────────────────────────────────
+const NSE_NAME_MAP = (() => {
+  const m = {};
+  const add = (ticker, ...names) => names.forEach(n => { m[n.toLowerCase()] = ticker; });
+  // Nifty 50 + popular NSE stocks
+  add('ADANIENT',   'adani enterprises', 'adani ent');
+  add('ADANIPORTS', 'adani ports', 'adani port', 'apsez');
+  add('ADANIPOWER', 'adani power');
+  add('ADANIGREEN', 'adani green', 'adani green energy');
+  add('APOLLOHOSP', 'apollo hospitals', 'apollo hospital');
+  add('APOLLOTYRE', 'apollo tyres', 'apollo tyre');
+  add('ASIANPAINT', 'asian paints', 'asian paint');
+  add('AXISBANK',   'axis bank');
+  add('BAJAJ-AUTO', 'bajaj auto');
+  add('BAJFINANCE', 'bajaj finance');
+  add('BAJAJFINSV', 'bajaj finserv');
+  add('BANKBARODA', 'bank of baroda');
+  add('BEL',        'bharat electronics', 'bel');
+  add('BERGEPAINT', 'berger paints', 'berger paint');
+  add('BHARTIARTL', 'bharti airtel', 'airtel');
+  add('BHEL',       'bharat heavy electricals', 'bhel');
+  add('BIOCON',     'biocon');
+  add('BPCL',       'bharat petroleum', 'bpcl');
+  add('BRITANNIA',  'britannia');
+  add('BSE',        'bse limited', 'bse ltd');
+  add('CANARABANK', 'canara bank');
+  add('CDSL',       'cdsl');
+  add('CIPLA',      'cipla');
+  add('COALINDIA',  'coal india');
+  add('COLPAL',     'colgate', 'colgate palmolive');
+  add('CUMMINSIND', 'cummins india', 'cummins');
+  add('DABUR',      'dabur');
+  add('DEEPAKNTR',  'deepak nitrite');
+  add('DIVISLAB',   "divi's laboratories", 'divis', 'divi labs');
+  add('DLF',        'dlf');
+  add('DMART',      'dmart', 'avenue supermarts', 'd-mart');
+  add('DRREDDY',    "dr reddy's", 'dr reddys', 'dr. reddys', 'dr reddys laboratories');
+  add('EICHERMOT',  'eicher motors');
+  add('FEDERALBNK', 'federal bank');
+  add('GAIL',       'gail');
+  add('GODREJPROP', 'godrej properties');
+  add('GRASIM',     'grasim');
+  add('HAL',        'hindustan aeronautics', 'hal');
+  add('HAVELLS',    'havells');
+  add('HCLTECH',    'hcl technologies', 'hcl tech', 'hcl');
+  add('HDFCBANK',   'hdfc bank');
+  add('HDFCLIFE',   'hdfc life');
+  add('HEROMOTOCO', 'hero motocorp', 'hero moto');
+  add('HINDALCO',   'hindalco');
+  add('HINDUNILVR', 'hindustan unilever', 'hul');
+  add('ICICIBANK',  'icici bank', 'icici');
+  add('ICICIGI',    'icici lombard', 'icici general insurance');
+  add('ICICIPRULI', 'icici prudential', 'icici pru');
+  add('IDFCFIRSTB', 'idfc first bank', 'idfc first');
+  add('IEX',        'iex', 'indian energy exchange');
+  add('IGL',        'indraprastha gas', 'igl');
+  add('INDUSINDBK', 'indusind bank');
+  add('INFY',       'infosys');
+  add('IOC',        'indian oil', 'iocl', 'indian oil corporation');
+  add('ITC',        'itc');
+  add('JSWSTEEL',   'jsw steel');
+  add('KOTAKBANK',  'kotak mahindra bank', 'kotak bank', 'kotak');
+  add('LT',         'larsen & toubro', 'larsen and toubro', 'l&t', 'lnt');
+  add('LTF',        'l&t finance', 'lnt finance');
+  add('LTIM',       'ltimindtree', 'lti mindtree');
+  add('LODHA',      'lodha', 'macrotech');
+  add('LUPIN',      'lupin');
+  add('M&M',        'mahindra & mahindra', 'mahindra and mahindra', 'm&m', 'mahindra');
+  add('MARICO',     'marico');
+  add('MARUTI',     'maruti suzuki', 'maruti');
+  add('MGL',        'mahanagar gas');
+  add('MOTHERSON',  'motherson', 'samvardhana motherson');
+  add('MPHASIS',    'mphasis');
+  add('MRF',        'mrf');
+  add('MUTHOOTFIN', 'muthoot finance');
+  add('NESTLEIND',  'nestle india', 'nestle');
+  add('NTPC',       'ntpc');
+  add('OBEROIRLTY', 'oberoi realty');
+  add('ONGC',       'ongc', 'oil and natural gas');
+  add('PAYTM',      'paytm', 'one97 communications');
+  add('PERSISTENT', 'persistent systems', 'persistent');
+  add('PETRONET',   'petronet lng', 'petronet');
+  add('PIDILITIND', 'pidilite industries', 'pidilite');
+  add('PIIND',      'pi industries');
+  add('PNB',        'punjab national bank', 'pnb');
+  add('POLYCAB',    'polycab');
+  add('POWERGRID',  'power grid', 'power grid corporation');
+  add('PRESTIGE',   'prestige estates');
+  add('RBLBANK',    'rbl bank');
+  add('RELIANCE',   'reliance industries', 'reliance');
+  add('SBILIFE',    'sbi life', 'sbi life insurance');
+  add('SBIN',       'state bank of india', 'sbi');
+  add('SHRIRAMFIN', 'shriram finance');
+  add('SIEMENS',    'siemens india', 'siemens');
+  add('SRF',        'srf');
+  add('SUNPHARMA',  'sun pharma', 'sun pharmaceutical');
+  add('TATACHEM',   'tata chemicals');
+  add('TATACONSUM', 'tata consumer', 'tata consumer products');
+  add('TATAMOTORS', 'tata motors');
+  add('TATAPOWER',  'tata power');
+  add('TATASTEEL',  'tata steel');
+  add('TCS',        'tata consultancy services', 'tcs');
+  add('TECHM',      'tech mahindra');
+  add('TITAN',      'titan company', 'titan');
+  add('TORNTPHARM', 'torrent pharma', 'torrent pharmaceuticals');
+  add('TORNTPOWER', 'torrent power');
+  add('TRENT',      'trent');
+  add('ULTRACEMCO', 'ultratech cement');
+  add('UNIONBANK',  'union bank of india', 'union bank');
+  add('UPL',        'upl');
+  add('VEDL',       'vedanta');
+  add('WIPRO',      'wipro');
+  add('YESBANK',    'yes bank');
+  add('ZOMATO',     'zomato');
+  add('ZYDUSLIFE',  'zydus lifesciences', 'zydus');
+  return m;
+})();
+
+/**
+ * Try to resolve a typed company name / abbreviation to a known NSE ticker.
+ * Returns the ticker string (e.g. "ICICIBANK") or null if not found.
+ */
+function resolveNseTicker(input) {
+  const key = input.toLowerCase().trim().replace(/\s+/g, ' ');
+  return NSE_NAME_MAP[key] || null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  CORS Proxies — raced in parallel; first valid response wins
@@ -749,18 +878,22 @@ async function searchSymbols(q) {
   } catch {
     // All proxies failed — offer "use typed symbol directly" so the user
     // isn't completely blocked from adding a holding
-    const typed = document.getElementById('symSearch').value.trim().toUpperCase();
+    const typedRaw = document.getElementById('symSearch').value.trim();
+    const typed    = typedRaw.toUpperCase();
     if (typed) {
+      // Try name→ticker map first, then strip spaces (e.g. "ICICI BANK"→"ICICIBANK")
+      const resolved = resolveNseTicker(typedRaw) || typed.replace(/\s+/g, '');
+      const label    = resolved !== typed.replace(/\s+/g, '') ? `${resolved} (matched from "${typed}")` : resolved;
       results.innerHTML = `
         <div class="result-item" style="flex-direction:column;gap:6px;align-items:flex-start">
           <span style="color:var(--muted);font-size:12px">Search unavailable (proxy error). Add directly:</span>
         </div>
-        <div class="result-item" onclick="selectSym('${esc(typed + '.NS')}','${esc(typed)}','NSI')">
-          <div style="flex:1"><div class="result-sym">${typed}</div><div class="result-name">Add as NSE stock</div></div>
+        <div class="result-item" onclick="selectSym('${esc(resolved + '.NS')}','${esc(typedRaw)}','NSI')">
+          <div style="flex:1"><div class="result-sym">${resolved}</div><div class="result-name">${label} · NSE</div></div>
           <span class="result-exch">NSE</span>
         </div>
-        <div class="result-item" onclick="selectSym('${esc(typed + '.BO')}','${esc(typed)}','BOM')">
-          <div style="flex:1"><div class="result-sym">${typed}</div><div class="result-name">Add as BSE stock</div></div>
+        <div class="result-item" onclick="selectSym('${esc(resolved + '.BO')}','${esc(typedRaw)}','BOM')">
+          <div style="flex:1"><div class="result-sym">${resolved}</div><div class="result-name">${label} · BSE</div></div>
           <span class="result-exch">BSE</span>
         </div>`;
     } else {
