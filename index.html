@@ -353,6 +353,43 @@
     .wl-header-row td.wl-sort-asc::after  { content:' ↑'; }
     .wl-header-row td.wl-sort-desc { color:var(--accent); }
     .wl-header-row td.wl-sort-desc::after { content:' ↓'; }
+
+    /* ── Holdings sort bar ── */
+    .holdings-sort-bar { display:flex; align-items:center; gap:6px; padding:9px 16px 8px;
+      overflow-x:auto; scrollbar-width:none; border-bottom:1px solid var(--border); }
+    .holdings-sort-bar::-webkit-scrollbar { display:none; }
+    .hs-label { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase;
+      letter-spacing:0.07em; flex-shrink:0; margin-right:2px; }
+    .hs-btn { background:var(--bg3); border:none; color:var(--muted); font-size:11px; font-weight:700;
+      padding:4px 11px; border-radius:20px; cursor:pointer; white-space:nowrap; flex-shrink:0;
+      transition:background 0.15s,color 0.15s; }
+    .hs-btn.active { background:var(--accent-dim); color:var(--accent); }
+    .hs-btn.asc::after  { content:' ↑'; }
+    .hs-btn.desc::after { content:' ↓'; }
+
+    /* ── Redesigned holding card ── */
+    .hc-val { font-weight:800; font-size:15px; letter-spacing:-0.3px; }
+    .hc-qty-row { display:flex; justify-content:space-between; align-items:center; margin-top:2px; }
+    .hc-qty-info { color:var(--muted); font-size:11px; white-space:nowrap; overflow:hidden;
+      text-overflow:ellipsis; max-width:180px; }
+    .hc-avg-row { display:flex; align-items:center; gap:5px; margin-top:3px; font-size:11px;
+      color:var(--muted); }
+    .hc-avg-arr { opacity:0.4; font-size:10px; }
+    .hc-cur-price { color:var(--text); font-weight:600; }
+
+    /* ── Portfolio allocation bar (analytics) ── */
+    .alloc-wrap { padding:12px 16px 8px; border-bottom:1px solid var(--border); }
+    .alloc-title { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase;
+      letter-spacing:0.07em; margin-bottom:8px; }
+    .alloc-bar { display:flex; height:10px; border-radius:5px; overflow:hidden; gap:2px; }
+    .alloc-seg { height:100%; cursor:default; transition:opacity 0.2s; min-width:4px; }
+    .alloc-seg:hover { opacity:0.65; }
+    .alloc-legend { display:flex; flex-wrap:wrap; gap:5px 14px; margin-top:8px; }
+    .alloc-leg { display:flex; align-items:center; gap:5px; font-size:10px; color:var(--muted); }
+    .alloc-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    /* Wt% cell with inline bar */
+    .wt-wrap { display:inline-flex; align-items:center; gap:5px; }
+    .wt-bar { display:inline-block; height:3px; border-radius:2px; opacity:0.5; min-width:2px; }
     .td-sym  { font-weight:800; font-size:13px; display:block; letter-spacing:-0.3px; }
     .td-name { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden;
                text-overflow:ellipsis; max-width:110px; display:block; margin-top:2px; }
@@ -515,6 +552,14 @@
           swipe to delete
         </span>
       </div>
+      <div class="holdings-sort-bar" id="holdingsSortBar">
+        <span class="hs-label">Sort</span>
+        <button class="hs-btn desc active" id="hsb-value"    onclick="setHoldingsSort('value')">Value</button>
+        <button class="hs-btn"             id="hsb-pl_pct"   onclick="setHoldingsSort('pl_pct')">P&amp;L%</button>
+        <button class="hs-btn"             id="hsb-pct_1d"   onclick="setHoldingsSort('pct_1d')">Today</button>
+        <button class="hs-btn"             id="hsb-name"     onclick="setHoldingsSort('name')">Name</button>
+        <button class="hs-btn"             id="hsb-invested" onclick="setHoldingsSort('invested')">Invested</button>
+      </div>
       <div id="holdingsList"></div>
       <div class="version-footer" id="versionFooter"></div>
     </div>
@@ -529,6 +574,7 @@
         </div>
         <div class="analytics-summary" id="analyticsSummary"></div>
       </div>
+      <div id="allocBar"></div>
       <div class="perf-table-wrap">
         <table class="perf-table" id="perfTable">
           <thead>
@@ -544,6 +590,8 @@
               <th onclick="sortTable('pct_1y')">1Y%</th>
               <th onclick="sortTable('div_yield')">Div%</th>
               <th onclick="sortTable('pl_pct')">P&amp;L%</th>
+              <th onclick="sortTable('wt')">Wt%</th>
+              <th onclick="sortTable('pl_abs')">P&amp;L ₹</th>
             </tr>
           </thead>
           <tbody id="perfTableBody"></tbody>
@@ -659,7 +707,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.27';
+const APP_BUILD  = '20260317.28';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -1016,8 +1064,9 @@ let liveData    = {};          // yf_symbol -> { price, pct_1w, pct_1m, pct_3m, 
 const failedSyms = new Set(); // symbols where this session's full refresh exhausted all retries with NO data
 let selectedSym = null;
 let searchTimer = null;
-let sortCol = 'value', sortDir = -1;       // portfolio sort state
-let wlSortCol = 'symbol', wlSortDir = -1; // watchlist independent sort state
+let sortCol = 'value', sortDir = -1;       // analytics portfolio sort state
+let wlSortCol = 'symbol', wlSortDir = -1; // analytics watchlist sort state
+let holdingsSortCol = 'value', holdingsSortDir = -1; // holdings page sort state
 let isRefreshing = false;              // true while sequential refresh is running
 let refreshAbort = false;              // set to true to stop in-progress refresh
 const fetchingSyms = new Set();        // yf_symbols currently being fetched
@@ -1551,11 +1600,18 @@ async function refreshAll(mode = 'all') {
           '&fields=trailingAnnualDividendYield&corsDomain=finance.yahoo.com';
         const divRes  = await proxyFetch(divUrl);
         const divData = await divRes.json();
+        let anyUpdated = false;
         (divData?.quoteResponse?.result || []).forEach(q => {
           if (liveData[q.symbol] && q.trailingAnnualDividendYield != null) {
             liveData[q.symbol].div_yield = parseFloat((q.trailingAnnualDividendYield * 100).toFixed(2));
+            anyUpdated = true;
           }
         });
+        // Re-render cards and analytics so div pills and Div% column appear
+        if (anyUpdated) {
+          renderPortfolio();
+          renderAnalytics();
+        }
       } catch { /* dividend yield is optional — ignore failures */ }
     }
 
@@ -1649,28 +1705,11 @@ function buildPillsHtml(d, isStale) {
 
 /** Build the delete-reveal + swipe card HTML for a single holding/watchlist entry. */
 function buildCard(h) {
-  const d          = liveData[h.yf_symbol];
-  const isWatch    = !!h.watch;
-  const initials   = h.symbol.replace(/\.(NS|BO)$/i, '').slice(0, 3);
-  const priceHtml  = d ? fmt(d.price) : '<span style="color:var(--muted)">—</span>';
-
-  let midHtml;
-  if (isWatch) {
-    midHtml = `<div class="hc-mid">
-        <span class="hc-name">${h.name || ''}</span>
-        <span class="perf-pill info" style="font-size:9px;padding:2px 5px">Watch</span>
-      </div>`;
-  } else {
-    const invested = h.buy_price * h.qty;
-    const curVal   = d ? d.price * h.qty : invested;
-    const pl       = curVal - invested;
-    const plPct    = invested ? pl / invested * 100 : 0;
-    const plHtml   = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
-    midHtml = `<div class="hc-mid">
-        <span class="hc-name">${h.name || ''}</span>
-        <span class="hc-pl" id="hcpl-${h.id}">${plHtml}</span>
-      </div>`;
-  }
+  const d        = liveData[h.yf_symbol];
+  const isWatch  = !!h.watch;
+  const initials = h.symbol.replace(/\.(NS|BO)$/i, '').slice(0, 3);
+  const refBtn   = isSgb(h.yf_symbol) ? '' :
+    `<button class="card-refresh-btn" id="hcrb-${h.id}" onclick="refreshOne('${h.yf_symbol}',event)" title="Refresh this stock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>`;
 
   let pills;
   if (isSgb(h.yf_symbol)) {
@@ -1689,36 +1728,118 @@ function buildCard(h) {
     pills = '<span class="perf-pill na">— awaiting data</span>';
   }
 
-  return `<div class="swipe-wrap" id="sw-${h.id}">
-    <div class="delete-reveal" onclick="confirmDelete(${h.id},'${esc(h.symbol)}')">
+  const deleteHtml = `<div class="delete-reveal" onclick="confirmDelete(${h.id},'${esc(h.symbol)}')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="3 6 5 6 21 6"/>
         <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
         <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
       </svg>
       <span>Delete</span>
-    </div>
-    <div class="swipe-item holding-card" data-id="${h.id}" onclick="handleCardClick(${h.id},this)">
-      <div class="hc-icon">${initials}</div>
-      <div class="hc-body">
+    </div>`;
+
+  let bodyHtml;
+  if (isWatch) {
+    // Watchlist card: compact, price prominent
+    const priceHtml = d ? fmt(d.price) : '<span style="color:var(--muted)">—</span>';
+    bodyHtml = `<div class="hc-body">
         <div class="hc-top">
-          <span class="hc-symbol">${h.symbol}</span>
+          <span class="hc-symbol">${h.symbol} <span class="td-wl-tag" style="font-size:9px;vertical-align:middle">W</span></span>
           <span class="hc-price" id="hcp-${h.id}">${priceHtml}</span>
         </div>
-        ${midHtml}
+        <div class="hc-mid">
+          <span class="hc-name">${h.name || ''}</span>
+          <span class="perf-pill info" style="font-size:9px;padding:2px 5px">Watch</span>
+        </div>
         <div class="hc-perfs-row">
           <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
-          ${isSgb(h.yf_symbol) ? '' : `<button class="card-refresh-btn" id="hcrb-${h.id}" onclick="refreshOne('${h.yf_symbol}',event)" title="Refresh this stock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>`}
+          ${refBtn}
         </div>
-      </div>
+      </div>`;
+  } else {
+    // Portfolio holding: current value prominent, avg→cur price, qty, P&L
+    const invested    = h.buy_price * h.qty;
+    const curVal      = d ? d.price * h.qty : null;
+    const pl          = curVal != null ? curVal - invested : 0;
+    const plPct       = invested ? pl / invested * 100 : 0;
+    const plCls       = pl >= 0 ? 'pos' : 'neg';
+    const curValStr   = curVal != null ? fmt(curVal) : '<span style="color:var(--muted)">—</span>';
+    const curPriceStr = d ? `₹${d.price.toLocaleString('en-IN', {maximumFractionDigits:2})}` : '—';
+    const avgStr      = `₹${h.buy_price.toLocaleString('en-IN', {maximumFractionDigits:2})}`;
+    const plStr       = `${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)`;
+    bodyHtml = `<div class="hc-body">
+        <div class="hc-top">
+          <span class="hc-symbol">${h.symbol}</span>
+          <span class="hc-val" id="hcp-${h.id}">${curValStr}</span>
+        </div>
+        <div class="hc-qty-row">
+          <span class="hc-qty-info">${h.name || h.symbol} · ${h.qty} qty</span>
+          <span class="hc-pl ${plCls}" id="hcpl-${h.id}">${plStr}</span>
+        </div>
+        <div class="hc-avg-row">
+          <span>Avg ${avgStr}</span>
+          <span class="hc-avg-arr">→</span>
+          <span class="hc-cur-price" id="hcpu-${h.id}">${curPriceStr}</span>
+        </div>
+        <div class="hc-perfs-row">
+          <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
+          ${refBtn}
+        </div>
+      </div>`;
+  }
+
+  return `<div class="swipe-wrap" id="sw-${h.id}">
+    ${deleteHtml}
+    <div class="swipe-item holding-card" data-id="${h.id}" onclick="handleCardClick(${h.id},this)">
+      <div class="hc-icon">${initials}</div>
+      ${bodyHtml}
     </div>
   </div>`;
 }
 
+function setHoldingsSort(col) {
+  holdingsSortDir = holdingsSortCol === col ? -holdingsSortDir : -1;
+  holdingsSortCol = col;
+  renderPortfolio();
+}
+
+function updateHoldingsSortBar() {
+  const keys = ['value','pl_pct','pct_1d','name','invested'];
+  keys.forEach(k => {
+    const btn = document.getElementById(`hsb-${k}`);
+    if (!btn) return;
+    const active = holdingsSortCol === k;
+    btn.classList.toggle('active', active);
+    btn.classList.toggle('asc',  active && holdingsSortDir ===  1);
+    btn.classList.toggle('desc', active && holdingsSortDir === -1);
+  });
+}
+
 function renderPortfolio() {
-  const list     = document.getElementById('holdingsList');
-  const holdings = portfolio.filter(h => !h.watch);
+  const list = document.getElementById('holdingsList');
   const watchlist = portfolio.filter(h => h.watch);
+
+  // Sort portfolio holdings
+  const INF = -Infinity;
+  const holdings = portfolio.filter(h => !h.watch).slice().sort((a, b) => {
+    const da = liveData[a.yf_symbol], db = liveData[b.yf_symbol];
+    if (holdingsSortCol === 'name') return holdingsSortDir * a.symbol.localeCompare(b.symbol);
+    let av, bv;
+    if (holdingsSortCol === 'value') {
+      av = da ? da.price * a.qty : INF;  bv = db ? db.price * b.qty : INF;
+    } else if (holdingsSortCol === 'pl_pct') {
+      const iA = a.buy_price * a.qty, cA = da ? da.price * a.qty : null;
+      const iB = b.buy_price * b.qty, cB = db ? db.price * b.qty : null;
+      av = cA != null ? (cA - iA) / iA * 100 : INF;
+      bv = cB != null ? (cB - iB) / iB * 100 : INF;
+    } else if (holdingsSortCol === 'pct_1d') {
+      av = da?.pct_1d ?? INF;  bv = db?.pct_1d ?? INF;
+    } else if (holdingsSortCol === 'invested') {
+      av = a.buy_price * a.qty;  bv = b.buy_price * b.qty;
+    } else { av = INF; bv = INF; }
+    return holdingsSortDir * (av - bv);
+  });
+
+  updateHoldingsSortBar();
 
   if (portfolio.length === 0) {
     list.innerHTML = `<div class="empty-state">
@@ -1761,15 +1882,18 @@ function updateCard(id) {
   const perfEl  = document.getElementById(`hcperf-${id}`);
   if (!priceEl) return; // card not in DOM yet
 
-  priceEl.innerHTML = d ? fmt(d.price) : '<span style="color:var(--muted)">—</span>';
-
-  if (!h.watch) {
-    const invested = h.buy_price * h.qty;
-    const curVal   = d ? d.price * h.qty : invested;
-    const pl       = curVal - invested;
-    const plPct    = invested ? pl / invested * 100 : 0;
-    const plEl     = document.getElementById(`hcpl-${id}`);
+  if (h.watch) {
+    priceEl.innerHTML = d ? fmt(d.price) : '<span style="color:var(--muted)">—</span>';
+  } else {
+    const invested  = h.buy_price * h.qty;
+    const curVal    = d ? d.price * h.qty : null;
+    const pl        = curVal != null ? curVal - invested : 0;
+    const plPct     = invested ? pl / invested * 100 : 0;
+    priceEl.innerHTML = curVal != null ? fmt(curVal) : '<span style="color:var(--muted)">—</span>';
+    const plEl  = document.getElementById(`hcpl-${id}`);
+    const puEl  = document.getElementById(`hcpu-${id}`);
     if (plEl) plEl.innerHTML = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
+    if (puEl && d) puEl.textContent = `₹${d.price.toLocaleString('en-IN', {maximumFractionDigits:2})}`;
   }
 
   if (isSgb(h.yf_symbol)) {
@@ -1904,31 +2028,47 @@ function renderAnalytics() {
     return `<span class="pct-${pos ? 'pos' : 'neg'} heat" style="--heat:${heat}">${pos ? '+' : ''}${v.toFixed(1)}%</span>`;
   }
 
+  // Total live portfolio value (for weight calculation)
+  const totalPfVal = portfolio.filter(h => !h.watch).reduce((s, h) => {
+    const d = liveData[h.yf_symbol];
+    return s + (d ? d.price * h.qty : h.buy_price * h.qty);
+  }, 0);
+
   function makeRow(h) {
     const d = liveData[h.yf_symbol];
-    if (h.watch) return { h, d, curVal: null, pl_pct: null };
+    if (h.watch) return { h, d, curVal: null, pl_pct: null, pl_abs: null, wt: null };
     const invested = h.buy_price * h.qty;
     const curVal   = d ? d.price * h.qty : null;
-    const pl_pct   = curVal != null && invested ? (curVal - invested) / invested * 100 : null;
-    return { h, d, invested, curVal, pl_pct };
+    const pl_abs   = curVal != null ? curVal - invested : null;
+    const pl_pct   = pl_abs != null && invested ? pl_abs / invested * 100 : null;
+    const wt       = curVal != null && totalPfVal > 0 ? curVal / totalPfVal * 100 : null;
+    return { h, d, invested, curVal, pl_pct, pl_abs, wt };
   }
 
   function sortRows(rows, col, dir) {
     return rows.slice().sort((a, b) => {
       if (col === 'symbol') return dir * a.h.symbol.localeCompare(b.h.symbol);
       const INF = -Infinity;
-      const av = col === 'price' ? (a.d?.price ?? INF) :
-                 col === 'value' ? (a.curVal ?? INF) :
-                 col === 'pl_pct' ? (a.pl_pct ?? INF) : (a.d?.[col] ?? INF);
-      const bv = col === 'price' ? (b.d?.price ?? INF) :
-                 col === 'value' ? (b.curVal ?? INF) :
-                 col === 'pl_pct' ? (b.pl_pct ?? INF) : (b.d?.[col] ?? INF);
-      return dir * (av - bv);
+      const pick = (r, c) =>
+        c === 'price'  ? (r.d?.price  ?? INF) :
+        c === 'value'  ? (r.curVal    ?? INF) :
+        c === 'pl_pct' ? (r.pl_pct   ?? INF) :
+        c === 'pl_abs' ? (r.pl_abs   ?? INF) :
+        c === 'wt'     ? (r.wt       ?? INF) : (r.d?.[c] ?? INF);
+      return dir * (pick(a, col) - pick(b, col));
     });
   }
 
-  function buildRow({ h, d, curVal, pl_pct }, isWl = false) {
+  function buildRow({ h, d, curVal, pl_pct, pl_abs, wt }, isWl = false) {
     const wlTag = isWl ? '<span class="td-wl-tag">W</span>' : '';
+    // Wt% cell with a mini proportional bar (max bar width ≈ 40px at 100%)
+    const wtCell = wt != null
+      ? `<span class="wt-wrap"><span>${wt.toFixed(1)}%</span><span class="wt-bar" style="width:${Math.max(2, wt * 0.4).toFixed(1)}px;background:var(--accent)"></span></span>`
+      : '<span class="pct-na">—</span>';
+    // P&L ₹ absolute cell
+    const plAbsCell = pl_abs != null
+      ? `<span class="${pl_abs >= 0 ? 'pct-pos' : 'pct-neg'} heat" style="--heat:${Math.max(0.06,Math.min(Math.abs(pl_abs)/50000,1)*0.22+0.04).toFixed(2)}">${pl_abs >= 0 ? '+' : ''}₹${Math.round(Math.abs(pl_abs)).toLocaleString('en-IN')}</span>`
+      : '<span class="pct-na">—</span>';
     return `<tr class="${isWl ? 'wl-row' : ''}" onclick="openDetail(${h.id})">
       <td>
         <span class="td-sym">${h.symbol}${wlTag}</span>
@@ -1944,6 +2084,8 @@ function renderAnalytics() {
       <td>${pctCell(d?.pct_1y, 30)}</td>
       <td>${pctCell(d?.div_yield, 5)}</td>
       <td>${pctCell(pl_pct, 30)}</td>
+      <td class="val-cell">${wtCell}</td>
+      <td>${plAbsCell}</td>
     </tr>`;
   }
 
@@ -1964,7 +2106,7 @@ function renderAnalytics() {
       : analyticsFilter === 'portfolio'
       ? 'No portfolio holdings yet — tap + to add'
       : 'Add holdings or watchlist items to see analytics';
-    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:48px 20px">${msg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:48px 20px">${msg}</td></tr>`;
     updateSortHeaders();
     if (sumEl) sumEl.innerHTML = '';
     return;
@@ -1975,14 +2117,14 @@ function renderAnalytics() {
   if (analyticsFilter === 'all') {
     html += pfRows.map(r => buildRow(r, false)).join('');
     if (wlRows.length > 0) {
-      const WL_COLS = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','div_yield','pl_pct'];
-      const WL_LABELS = ['Stock','Price','Value','1D%','1W%','1M%','3M%','6M%','1Y%','Div%','P&L%'];
+      const WL_COLS   = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','div_yield','pl_pct','wt','pl_abs'];
+      const WL_LABELS = ['Stock','Price','Value','1D%','1W%','1M%','3M%','6M%','1Y%','Div%','P&L%','Wt%','P&L ₹'];
       const wlSubHeader = WL_COLS.map((c, i) => {
         const isSorted = wlSortCol === c;
         const cls = isSorted ? (wlSortDir === 1 ? 'wl-sort-asc' : 'wl-sort-desc') : '';
         return `<td class="${cls}" onclick="sortWatchlist('${c}')">${WL_LABELS[i]}</td>`;
       }).join('');
-      html += `<tr class="perf-sep-row"><td colspan="11"><span class="perf-sep-label">Watchlist</span></td></tr>`;
+      html += `<tr class="perf-sep-row"><td colspan="13"><span class="perf-sep-label">Watchlist</span></td></tr>`;
       html += `<tr class="wl-header-row">${wlSubHeader}</tr>`;
       html += wlRows.map(r => buildRow(r, true)).join('');
     }
@@ -1994,6 +2136,34 @@ function renderAnalytics() {
   tbody.innerHTML = html;
   updateSortHeaders();
 
+  // ── Portfolio allocation bar ────────────────────────────────────────────────
+  const allocEl = document.getElementById('allocBar');
+  if (allocEl) {
+    const COLORS = ['#6366f1','#22c55e','#f59e0b','#ec4899','#14b8a6','#f97316','#8b5cf6','#06b6d4','#84cc16','#e11d48'];
+    const pfForAlloc = portfolio.filter(h => !h.watch);
+    const allocTotal = pfForAlloc.reduce((s, h) => {
+      const d = liveData[h.yf_symbol];
+      return s + (d ? d.price * h.qty : h.buy_price * h.qty);
+    }, 0);
+    if (analyticsFilter !== 'watchlist' && pfForAlloc.length > 0 && allocTotal > 0) {
+      // Sort by value desc for display
+      const allocItems = pfForAlloc.map((h, i) => {
+        const d = liveData[h.yf_symbol];
+        const v = d ? d.price * h.qty : h.buy_price * h.qty;
+        return { sym: h.symbol.replace(/\.(NS|BO)$/i,''), val: v, color: COLORS[i % COLORS.length] };
+      }).sort((a, b) => b.val - a.val);
+      const segs = allocItems.map(x =>
+        `<div class="alloc-seg" style="width:${(x.val/allocTotal*100).toFixed(2)}%;background:${x.color}" title="${x.sym} ${(x.val/allocTotal*100).toFixed(1)}%"></div>`
+      ).join('');
+      const legs = allocItems.map(x =>
+        `<span class="alloc-leg"><span class="alloc-dot" style="background:${x.color}"></span>${x.sym} <strong>${(x.val/allocTotal*100).toFixed(1)}%</strong></span>`
+      ).join('');
+      allocEl.innerHTML = `<div class="alloc-wrap"><div class="alloc-title">Portfolio Allocation</div><div class="alloc-bar">${segs}</div><div class="alloc-legend">${legs}</div></div>`;
+    } else {
+      allocEl.innerHTML = '';
+    }
+  }
+
   // ── Summary strip ──────────────────────────────────────────────────────────
   if (sumEl) {
     const visRows = analyticsFilter === 'watchlist' ? wlRows :
@@ -2002,9 +2172,15 @@ function renderAnalytics() {
       sumEl.innerHTML = `<span class="as-chip"><strong>${wlRows.length}</strong> watching</span>`;
     } else {
       let inv = 0, cur = 0, wSum = 0, wPct = 0;
+      let bestToday = null, worstToday = null;
       visRows.forEach(r => {
         if (r.invested) { inv += r.invested; cur += r.curVal ?? r.invested; }
-        if (r.curVal && r.d?.pct_1d != null) { wSum += r.curVal; wPct += r.curVal * r.d.pct_1d; }
+        if (r.curVal && r.d?.pct_1d != null) {
+          wSum += r.curVal; wPct += r.curVal * r.d.pct_1d;
+          const sym = r.h.symbol.replace(/\.(NS|BO)$/i,'');
+          if (!bestToday  || r.d.pct_1d > bestToday.v)  bestToday  = { sym, v: r.d.pct_1d };
+          if (!worstToday || r.d.pct_1d < worstToday.v) worstToday = { sym, v: r.d.pct_1d };
+        }
       });
       const pl     = cur - inv;
       const plPct  = inv ? pl / inv * 100 : 0;
@@ -2016,6 +2192,8 @@ function renderAnalytics() {
         inv > 0 ? `<span class="as-chip">Invested <strong>₹${Math.round(inv).toLocaleString('en-IN')}</strong></span>` : null,
         inv > 0 ? `<span class="as-chip ${plCls}">${pl >= 0 ? '+' : ''}₹${Math.round(pl).toLocaleString('en-IN')} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>` : null,
         today != null ? `<span class="as-chip ${todCls}">Today ${today >= 0 ? '+' : ''}${today.toFixed(2)}%</span>` : null,
+        bestToday  ? `<span class="as-chip pos" title="Best today">↑ ${bestToday.sym} +${bestToday.v.toFixed(1)}%</span>` : null,
+        worstToday ? `<span class="as-chip neg" title="Worst today">↓ ${worstToday.sym} ${worstToday.v.toFixed(1)}%</span>` : null,
       ].filter(Boolean);
       sumEl.innerHTML = chips.join('');
     }
@@ -2034,7 +2212,7 @@ function sortWatchlist(col) {
 }
 
 function updateSortHeaders() {
-  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','div_yield','pl_pct'];
+  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','div_yield','pl_pct','wt','pl_abs'];
   document.querySelectorAll('#perfTable th').forEach((th, i) => {
     th.classList.remove('sort-asc', 'sort-desc');
     if (cols[i] === sortCol) th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
