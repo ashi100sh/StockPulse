@@ -524,7 +524,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD = '20260317.6';
+const APP_BUILD  = '20260317.7';
+const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
+const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
+const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
+const SPIN_ICO    = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.7s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>`;
 
 // Yahoo Finance uses 'NSI' internally for NSE India — map to friendly labels
 const EXCH_DISPLAY = { NSI: 'NSE', BOM: 'BSE' };
@@ -615,6 +619,9 @@ let liveData    = {};          // yf_symbol -> { price, pct_1w, pct_1m, pct_3m, 
 let selectedSym = null;
 let searchTimer = null;
 let sortCol = 'value', sortDir = -1;   // analytics table sort state
+let isRefreshing = false;              // true while sequential refresh is running
+let refreshAbort = false;              // set to true to stop in-progress refresh
+const fetchingSyms = new Set();        // yf_symbols currently being fetched
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Theme
@@ -642,6 +649,22 @@ function loadPortfolio() {
 }
 function savePortfolio() {
   localStorage.setItem('ptf_v1', JSON.stringify(portfolio));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Live-price cache
+// ─────────────────────────────────────────────────────────────────────────────
+function loadLiveCache() {
+  try { return JSON.parse(localStorage.getItem(CACHE_KEY) || 'null'); }
+  catch { return null; }
+}
+function saveLiveCache() {
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: liveData })); }
+  catch {}
+}
+function isCacheStale() {
+  const c = loadLiveCache();
+  return !c || !c.ts || (Date.now() - c.ts) > STALE_MS;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -745,20 +768,35 @@ function addHolding() {
   const bp  = parseFloat(document.getElementById('fBuyPrice').value);
   const qty = parseFloat(document.getElementById('fQty').value);
   if (!bp || bp <= 0 || !qty || qty <= 0) { showToast('Enter valid price and quantity'); return; }
+
+  const sym = selectedSym.yf_symbol;
   portfolio.push({
-    id: Date.now(),
-    symbol:     selectedSym.symbol,
-    yf_symbol:  selectedSym.yf_symbol,
-    name:       selectedSym.name,
-    exchange:   selectedSym.exchange,
-    buy_price:  bp,
+    id:        Date.now(),
+    symbol:    selectedSym.symbol,
+    yf_symbol: sym,
+    name:      selectedSym.name,
+    exchange:  selectedSym.exchange,
+    buy_price: bp,
     qty,
-    buy_date:   document.getElementById('fDate').value || '',
+    buy_date:  document.getElementById('fDate').value || '',
   });
   savePortfolio();
   closeAddSheet();
   showToast('Added ' + selectedSym.symbol);
-  refreshAll();
+
+  // Render immediately with "Fetching…" pill — no wait
+  fetchingSyms.add(sym);
+  renderPortfolio();
+
+  // Fetch only this one symbol in the background
+  fetchLive(sym).then(d => {
+    fetchingSyms.delete(sym);
+    if (d) liveData[sym] = d;
+    portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
+    updateSummary();
+    saveLiveCache();
+    if (document.getElementById('page-heatmap').classList.contains('active')) renderAnalytics();
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -801,30 +839,57 @@ async function fetchLive(yf_symbol) {
 }
 
 async function refreshAll() {
-  const btn = document.getElementById('refreshBtn');
-  const spinSvg = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.7s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>`;
-  btn.innerHTML = spinSvg + ' Loading';
-  btn.disabled = true;
+  if (isRefreshing) { showToast('Refresh in progress…'); return; }
 
   const unique = [...new Set(portfolio.map(h => h.yf_symbol))];
-  await Promise.all(unique.map(async sym => {
-    const d = await fetchLive(sym);
-    if (d) liveData[sym] = d;
-  }));
+  if (!unique.length) return;
 
-  renderPortfolio();
-  renderAnalytics();
-  document.getElementById('lastUpdate').textContent =
-    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
-  btn.disabled = false;
+  isRefreshing = true;
+  refreshAbort = false;
+  const btn = document.getElementById('refreshBtn');
+  let done = 0;
+
+  for (const sym of unique) {
+    if (refreshAbort) break;
+    done++;
+    btn.innerHTML = SPIN_ICO + ` ${done}/${unique.length}`;
+
+    // Mark cards for this symbol as "Fetching…"
+    fetchingSyms.add(sym);
+    portfolio.filter(h => h.yf_symbol === sym).forEach(h => {
+      const el = document.getElementById(`hcperf-${h.id}`);
+      if (el) el.innerHTML = '<span class="perf-pill na">⟳ Fetching…</span>';
+    });
+
+    const d = await fetchLive(sym);
+    fetchingSyms.delete(sym);
+    if (d) liveData[sym] = d;
+
+    // Update cards + summary live as each result arrives
+    portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
+    updateSummary();
+  }
+
+  if (!refreshAbort) {
+    saveLiveCache();
+    document.getElementById('lastUpdate').textContent =
+      new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  isRefreshing = false;
+  refreshAbort = false;
+  btn.innerHTML = REFRESH_ICO;
+
+  // Refresh analytics table if it's currently visible
+  if (document.getElementById('page-heatmap').classList.contains('active')) {
+    renderAnalytics();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Portfolio Render
 // ─────────────────────────────────────────────────────────────────────────────
 function renderPortfolio() {
-  let inv = 0, cur = 0;
   const list = document.getElementById('holdingsList');
 
   if (portfolio.length === 0) {
@@ -847,20 +912,24 @@ function renderPortfolio() {
     const curVal   = d ? d.price * h.qty : invested;
     const pl       = curVal - invested;
     const plPct    = invested ? pl / invested * 100 : 0;
-    inv += invested; cur += curVal;
 
     const priceHtml = d
       ? fmt(d.price)
       : '<span style="color:var(--muted)">—</span>';
     const plHtml = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
 
-    const pills = d
-      ? [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
-          .map(([lbl, v]) => v == null
-            ? `<span class="perf-pill na">${lbl} —</span>`
-            : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
-          .join('')
-      : '<span class="perf-pill na">Loading…</span>';
+    let pills;
+    if (d) {
+      pills = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
+        .map(([lbl, v]) => v == null
+          ? `<span class="perf-pill na">${lbl} —</span>`
+          : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
+        .join('');
+    } else if (fetchingSyms.has(h.yf_symbol)) {
+      pills = '<span class="perf-pill na">⟳ Fetching…</span>';
+    } else {
+      pills = '<span class="perf-pill na">— no data</span>';
+    }
 
     const initials = h.symbol.replace(/\.(NS|BO)$/i, '').slice(0, 3);
 
@@ -878,30 +947,76 @@ function renderPortfolio() {
         <div class="hc-body">
           <div class="hc-top">
             <span class="hc-symbol">${h.symbol}</span>
-            <span class="hc-price">${priceHtml}</span>
+            <span class="hc-price" id="hcp-${h.id}">${priceHtml}</span>
           </div>
           <div class="hc-mid">
             <span class="hc-name">${h.name || ''}</span>
-            <span class="hc-pl">${plHtml}</span>
+            <span class="hc-pl" id="hcpl-${h.id}">${plHtml}</span>
           </div>
-          <div class="hc-perfs">${pills}</div>
+          <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
         </div>
       </div>
     </div>`;
   }).join('');
 
+  updateSummary();
+  initSwipes();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Partial card + summary update (called after each sequential fetch)
+// ─────────────────────────────────────────────────────────────────────────────
+function updateCard(id) {
+  const h = portfolio.find(x => x.id === id);
+  if (!h) return;
+  const d        = liveData[h.yf_symbol];
+  const invested = h.buy_price * h.qty;
+  const curVal   = d ? d.price * h.qty : invested;
+  const pl       = curVal - invested;
+  const plPct    = invested ? pl / invested * 100 : 0;
+
+  const priceEl = document.getElementById(`hcp-${id}`);
+  const plEl    = document.getElementById(`hcpl-${id}`);
+  const perfEl  = document.getElementById(`hcperf-${id}`);
+  if (!priceEl) return; // card not in DOM yet
+
+  priceEl.innerHTML = d
+    ? fmt(d.price)
+    : '<span style="color:var(--muted)">—</span>';
+
+  plEl.innerHTML = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
+
+  if (d) {
+    perfEl.innerHTML = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
+      .map(([lbl, v]) => v == null
+        ? `<span class="perf-pill na">${lbl} —</span>`
+        : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
+      .join('');
+  } else if (!fetchingSyms.has(h.yf_symbol)) {
+    perfEl.innerHTML = '<span class="perf-pill na">— no data</span>';
+  }
+  // If still fetching, leave the "⟳ Fetching…" text as-is
+}
+
+function updateSummary() {
+  if (portfolio.length === 0) return;
+  let inv = 0, cur = 0;
+  portfolio.forEach(h => {
+    const d = liveData[h.yf_symbol];
+    inv += h.buy_price * h.qty;
+    cur += d ? d.price * h.qty : h.buy_price * h.qty;
+  });
   const totalPL  = cur - inv;
   const totalRet = inv ? totalPL / inv * 100 : 0;
+
   document.getElementById('sumInvested').textContent = fmtC(inv);
   document.getElementById('sumCurrent').textContent  = fmtC(cur);
   const plEl = document.getElementById('sumPL');
   plEl.textContent = (totalPL >= 0 ? '+' : '') + fmtC(totalPL);
-  plEl.className = 'sum-val ' + (totalPL >= 0 ? 'pos' : 'neg');
+  plEl.className   = 'sum-val ' + (totalPL >= 0 ? 'pos' : 'neg');
   const retEl = document.getElementById('sumReturn');
   retEl.textContent = (totalRet >= 0 ? '+' : '') + totalRet.toFixed(1) + '%';
-  retEl.className = 'sum-val ' + (totalRet >= 0 ? 'pos' : 'neg');
-
-  initSwipes();
+  retEl.className   = 'sum-val ' + (totalRet >= 0 ? 'pos' : 'neg');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1246,11 +1361,35 @@ if ('serviceWorker' in navigator) {
 //  Boot
 // ─────────────────────────────────────────────────────────────────────────────
 applyTheme();
-document.getElementById('buildBadge').textContent   = 'b' + APP_BUILD;
+document.getElementById('buildBadge').textContent    = 'b' + APP_BUILD;
 document.getElementById('versionFooter').textContent  = 'StockPulse · Build ' + APP_BUILD;
 document.getElementById('versionFooter2').textContent = 'StockPulse · Build ' + APP_BUILD;
-renderPortfolio();
-if (portfolio.length > 0) refreshAll();
+
+// ── Smart startup: restore cached prices instantly, then only refresh if stale ──
+(function boot() {
+  const cache = loadLiveCache();
+  if (cache && cache.data) {
+    liveData = cache.data;
+    // Show cache age in topbar
+    if (cache.ts) {
+      const ageMs = Date.now() - cache.ts;
+      const m = Math.floor(ageMs / 60000);
+      document.getElementById('lastUpdate').textContent =
+        m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`;
+    }
+  }
+  renderPortfolio();
+  if (portfolio.length > 0 && isCacheStale()) {
+    refreshAll(); // background sequential refresh — stale or first open
+  }
+})();
+
+// Re-check on PWA foreground resume (e.g. user comes back after hours)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && portfolio.length > 0 && !isRefreshing && isCacheStale()) {
+    refreshAll();
+  }
+});
 </script>
 </body>
 </html>
