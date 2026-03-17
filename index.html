@@ -489,7 +489,7 @@
       </svg>
       Cancel
     </button>
-    <button class="icon-btn" id="refreshBtn" onclick="refreshAll('all')">
+    <button class="icon-btn" id="refreshBtn" onclick="refreshAll('all',event)" title="Refresh (Shift+click to force-refresh all)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
         <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
@@ -568,8 +568,7 @@
     <div class="page" id="page-heatmap">
       <div class="analytics-header">
         <div class="analytics-filter">
-          <button class="af-btn active" onclick="setAnalyticsFilter('all')">All</button>
-          <button class="af-btn" onclick="setAnalyticsFilter('portfolio')">Portfolio</button>
+          <button class="af-btn active" onclick="setAnalyticsFilter('portfolio')">Portfolio</button>
           <button class="af-btn" onclick="setAnalyticsFilter('watchlist')">Watchlist</button>
         </div>
         <div class="analytics-summary" id="analyticsSummary"></div>
@@ -707,9 +706,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.28';
+const APP_BUILD  = '20260317.29';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
-const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
+const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
+const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
 const SPIN_ICO    = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="animation:spin 0.7s linear infinite"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>`;
 
@@ -1119,6 +1119,12 @@ function saveLiveCache() {
   try { localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: clean })); }
   catch {}
 }
+/** Returns true if sym's live data was freshly fetched this session and is < SMART_STALE_MS old */
+function isDataFresh(sym) {
+  const d = liveData[sym];
+  return !!(d && !d._cacheTs && d._fetchedAt && (Date.now() - d._fetchedAt < SMART_STALE_MS));
+}
+
 /** Human-readable age string from milliseconds */
 function cacheAgeStr(ageMs) {
   const m = Math.floor(ageMs / 60000);
@@ -1339,11 +1345,11 @@ function clearSym() {
 //  Add Sheet
 // ─────────────────────────────────────────────────────────────────────────────
 let addMode = 'portfolio';
-let analyticsFilter = 'all'; // 'all' | 'portfolio' | 'watchlist'
+let analyticsFilter = 'portfolio'; // 'portfolio' | 'watchlist'
 function setAnalyticsFilter(f) {
   analyticsFilter = f;
   document.querySelectorAll('.af-btn').forEach((btn, i) =>
-    btn.classList.toggle('active', ['all','portfolio','watchlist'][i] === f));
+    btn.classList.toggle('active', ['portfolio','watchlist'][i] === f));
   renderAnalytics();
 }
 function setAddMode(mode) {
@@ -1416,7 +1422,7 @@ function addHolding() {
       if (d) break;
     }
     fetchingSyms.delete(sym);
-    if (d) { delete d._cacheTs; liveData[sym] = d; failedSyms.delete(sym); }
+    if (d) { delete d._cacheTs; d._fetchedAt = Date.now(); liveData[sym] = d; failedSyms.delete(sym); }
     else { failedSyms.add(sym); }
     portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
     updateSummary();
@@ -1512,7 +1518,7 @@ function stopRefresh() {
   if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.textContent = 'Stopping…'; }
 }
 
-async function refreshAll(mode = 'all') {
+async function refreshAll(mode = 'all', evt = null) {
   if (isRefreshing) { showToast('Refresh in progress…'); return; }
 
   const allUnique  = [...new Set(portfolio.map(h => h.yf_symbol))];
@@ -1524,7 +1530,25 @@ async function refreshAll(mode = 'all') {
     if (sgbCount > 0) showToast(`${sgbCount} SGB holding${sgbCount > 1 ? 's' : ''} skipped — not supported by Yahoo Finance`);
   }
 
-  const toFetch = mode === 'pending' ? fetchable.filter(s => !liveData[s]) : fetchable;
+  // Smart refresh: skip symbols already fresh (<15 min old), unless Shift+click
+  const forceAll = evt?.shiftKey === true;
+  let toFetch;
+  if (mode === 'pending') {
+    toFetch = fetchable.filter(s => !liveData[s]);
+  } else if (forceAll) {
+    toFetch = fetchable; // force-refresh every symbol
+  } else {
+    // Smart: only re-fetch stale (from cache, never fetched, or >15 min old)
+    const fresh  = fetchable.filter(s => isDataFresh(s));
+    toFetch = fetchable.filter(s => !isDataFresh(s));
+    if (fresh.length > 0 && toFetch.length === 0) {
+      showToast(`All ${fresh.length} symbols up to date · Shift+click to force refresh`);
+      return;
+    }
+    if (fresh.length > 0) {
+      showToast(`Skipping ${fresh.length} fresh · refreshing ${toFetch.length} stale`);
+    }
+  }
   if (!toFetch.length) { updateRetryBtn(); return; }
 
   isRefreshing = true;
@@ -1538,11 +1562,13 @@ async function refreshAll(mode = 'all') {
   const cancelBtn = document.getElementById('cancelBtn');
   if (cancelBtn) { cancelBtn.style.display = ''; cancelBtn.disabled = false; cancelBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> Cancel'; }
 
+  const freshCount = fetchable.length - toFetch.length; // symbols skipped as fresh
   /** Fetch one pass over `symbols`; update cards live. */
   const runPass = async (symbols, label) => {
     for (let i = 0; i < symbols.length; i++) {
       if (refreshAbort) return;
-      btn.innerHTML = SPIN_ICO + ` ${label}${i + 1}/${symbols.length}`;
+      const suffix = freshCount > 0 ? ` +${freshCount}✓` : '';
+      btn.innerHTML = SPIN_ICO + ` ${label}${i + 1}/${symbols.length}${suffix}`;
 
       const sym = symbols[i];
       fetchingSyms.add(sym);
@@ -1554,7 +1580,8 @@ async function refreshAll(mode = 'all') {
       const d = await fetchLive(sym);
       fetchingSyms.delete(sym);
       if (d) {
-        delete d._cacheTs;   // mark as freshly fetched this session
+        delete d._cacheTs;        // mark as freshly fetched this session
+        d._fetchedAt = Date.now(); // for smart-refresh staleness check
         liveData[sym] = d;
         failedSyms.delete(sym);
       }
@@ -1623,7 +1650,7 @@ async function refreshAll(mode = 'all') {
 
   isRefreshing = false;
   refreshAbort = false;
-  btn.onclick = () => refreshAll('all');
+  btn.onclick = e => refreshAll('all', e);
   btn.innerHTML = REFRESH_ICO;
   const cancelBtnEnd = document.getElementById('cancelBtn');
   if (cancelBtnEnd) cancelBtnEnd.style.display = 'none';
@@ -1671,7 +1698,7 @@ async function refreshOne(yfSym, evt) {
 
   const d = await fetchLive(yfSym);
   fetchingSyms.delete(yfSym);
-  if (d) { delete d._cacheTs; liveData[yfSym] = d; failedSyms.delete(yfSym); }
+  if (d) { delete d._cacheTs; d._fetchedAt = Date.now(); liveData[yfSym] = d; failedSyms.delete(yfSym); }
   else    { failedSyms.add(yfSym); }
 
   portfolio.filter(h => h.yf_symbol === yfSym).forEach(h => {
@@ -2098,14 +2125,11 @@ function renderAnalytics() {
   const pfRows = sortRows(allPf, sortCol,   sortDir);
   const wlRows = sortRows(allWl, wlSortCol, wlSortDir);
 
-  if (portfolio.length === 0 ||
-      (analyticsFilter === 'portfolio' && pfRows.length === 0) ||
-      (analyticsFilter === 'watchlist' && wlRows.length === 0)) {
+  const activeRows = analyticsFilter === 'watchlist' ? wlRows : pfRows;
+  if (portfolio.length === 0 || activeRows.length === 0) {
     const msg = analyticsFilter === 'watchlist'
       ? 'No watchlist items yet — tap + and choose Watchlist'
-      : analyticsFilter === 'portfolio'
-      ? 'No portfolio holdings yet — tap + to add'
-      : 'Add holdings or watchlist items to see analytics';
+      : 'No portfolio holdings yet — tap + to add';
     tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:48px 20px">${msg}</td></tr>`;
     updateSortHeaders();
     if (sumEl) sumEl.innerHTML = '';
@@ -2113,26 +2137,8 @@ function renderAnalytics() {
   }
 
   // ── Build table rows ───────────────────────────────────────────────────────
-  let html = '';
-  if (analyticsFilter === 'all') {
-    html += pfRows.map(r => buildRow(r, false)).join('');
-    if (wlRows.length > 0) {
-      const WL_COLS   = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','div_yield','pl_pct','wt','pl_abs'];
-      const WL_LABELS = ['Stock','Price','Value','1D%','1W%','1M%','3M%','6M%','1Y%','Div%','P&L%','Wt%','P&L ₹'];
-      const wlSubHeader = WL_COLS.map((c, i) => {
-        const isSorted = wlSortCol === c;
-        const cls = isSorted ? (wlSortDir === 1 ? 'wl-sort-asc' : 'wl-sort-desc') : '';
-        return `<td class="${cls}" onclick="sortWatchlist('${c}')">${WL_LABELS[i]}</td>`;
-      }).join('');
-      html += `<tr class="perf-sep-row"><td colspan="13"><span class="perf-sep-label">Watchlist</span></td></tr>`;
-      html += `<tr class="wl-header-row">${wlSubHeader}</tr>`;
-      html += wlRows.map(r => buildRow(r, true)).join('');
-    }
-  } else if (analyticsFilter === 'portfolio') {
-    html = pfRows.map(r => buildRow(r, false)).join('');
-  } else {
-    html = wlRows.map(r => buildRow(r, true)).join('');
-  }
+  const isWl = analyticsFilter === 'watchlist';
+  const html  = activeRows.map(r => buildRow(r, isWl)).join('');
   tbody.innerHTML = html;
   updateSortHeaders();
 
@@ -2166,8 +2172,7 @@ function renderAnalytics() {
 
   // ── Summary strip ──────────────────────────────────────────────────────────
   if (sumEl) {
-    const visRows = analyticsFilter === 'watchlist' ? wlRows :
-                    analyticsFilter === 'portfolio' ? pfRows : allPf;
+    const visRows = analyticsFilter === 'watchlist' ? wlRows : pfRows;
     if (analyticsFilter === 'watchlist') {
       sumEl.innerHTML = `<span class="as-chip"><strong>${wlRows.length}</strong> watching</span>`;
     } else {
