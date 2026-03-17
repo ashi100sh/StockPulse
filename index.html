@@ -258,6 +258,23 @@
     .icon-btn-cancel { border-color:#e05252; color:#e05252; }
     .icon-btn-cancel:hover { background:#3a1a1a; border-color:#f07070; color:#f07070; }
     .icon-btn-cancel:active { border-color:#f07070; color:#f07070; }
+
+    /* ── Watchlist divider ── */
+    .wl-divider { margin:16px 14px 10px; display:flex; align-items:center; gap:10px; }
+    .wl-divider-line { flex:1; height:1px; background:var(--border); }
+    .wl-divider-label { font-size:10px; font-weight:700; color:var(--muted);
+                        text-transform:uppercase; letter-spacing:0.08em; white-space:nowrap; }
+
+    /* ── Add-sheet type toggle ── */
+    .add-type-toggle { display:flex; background:var(--bg2); border-radius:9px; padding:3px;
+                       gap:3px; margin-bottom:14px; }
+    .add-type-btn { flex:1; padding:7px; border:none; background:transparent; color:var(--muted);
+                    font-size:12px; font-weight:600; border-radius:7px; cursor:pointer;
+                    transition:background 0.15s,color 0.15s; font-family:inherit; }
+    .add-type-btn.active { background:var(--bg3); color:var(--text); border:1px solid var(--border); }
+
+    /* ── Perf pill: info (div yield) ── */
+    .perf-pill.info { color:var(--accent); }
     .theme-btn { font-size:16px; padding:6px 9px; }
     .last-update { font-size:11px; color:var(--muted); font-weight:500; }
 
@@ -276,7 +293,7 @@
                        text-transform:uppercase; letter-spacing:0.07em; }
     .analytics-hint { font-size:11px; color:var(--muted); }
     .perf-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:20px; }
-    .perf-table { width:100%; border-collapse:collapse; min-width:460px; }
+    .perf-table { width:100%; border-collapse:collapse; min-width:680px; }
     .perf-table thead { position:sticky; top:0; z-index:5; }
     .perf-table th { background:var(--bg2); padding:10px 10px; font-size:10px; font-weight:700;
                      color:var(--muted); text-transform:uppercase; letter-spacing:0.06em;
@@ -467,10 +484,13 @@
               <th onclick="sortTable('symbol')">Stock</th>
               <th onclick="sortTable('price')">Price</th>
               <th onclick="sortTable('value')">Value</th>
+              <th onclick="sortTable('pct_1d')">1D%</th>
               <th onclick="sortTable('pct_1w')">1W%</th>
               <th onclick="sortTable('pct_1m')">1M%</th>
               <th onclick="sortTable('pct_3m')">3M%</th>
+              <th onclick="sortTable('pct_6m')">6M%</th>
               <th onclick="sortTable('pct_1y')">1Y%</th>
+              <th onclick="sortTable('div_yield')">Div%</th>
               <th onclick="sortTable('pl_pct')">P&amp;L%</th>
             </tr>
           </thead>
@@ -518,6 +538,10 @@
       <button class="sheet-close" onclick="closeAddSheet()">✕</button>
     </div>
     <div class="sheet-body">
+      <div class="add-type-toggle">
+        <button class="add-type-btn active" id="addTypePfBtn" onclick="setAddMode('portfolio')">Portfolio</button>
+        <button class="add-type-btn" id="addTypeWlBtn" onclick="setAddMode('watchlist')">Watchlist</button>
+      </div>
       <div class="search-wrap">
         <input class="search-input" id="symSearch" type="text"
           placeholder="Search symbol or company…"
@@ -535,19 +559,21 @@
         <button class="selected-clear" onclick="clearSym()">✕</button>
       </div>
 
-      <div class="field-row">
-        <div class="field">
-          <label>Buy Price (₹)</label>
-          <input type="number" id="fBuyPrice" inputmode="decimal" placeholder="0.00" step="0.01" min="0" />
+      <div id="addInvestFields">
+        <div class="field-row">
+          <div class="field">
+            <label>Buy Price (₹)</label>
+            <input type="number" id="fBuyPrice" inputmode="decimal" placeholder="0.00" step="0.01" min="0" />
+          </div>
+          <div class="field">
+            <label>Quantity</label>
+            <input type="number" id="fQty" inputmode="decimal" placeholder="1" step="0.001" min="0" />
+          </div>
         </div>
         <div class="field">
-          <label>Quantity</label>
-          <input type="number" id="fQty" inputmode="decimal" placeholder="1" step="0.001" min="0" />
+          <label>Buy Date (optional)</label>
+          <input type="date" id="fDate" />
         </div>
-      </div>
-      <div class="field">
-        <label>Buy Date (optional)</label>
-        <input type="date" id="fDate" />
       </div>
       <button class="btn-full btn-primary" id="addBtn" onclick="addHolding()" disabled>
         Add to Portfolio
@@ -581,7 +607,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.23';
+const APP_BUILD  = '20260317.24';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -1173,6 +1199,14 @@ function clearSym() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Add Sheet
 // ─────────────────────────────────────────────────────────────────────────────
+let addMode = 'portfolio';
+function setAddMode(mode) {
+  addMode = mode;
+  document.getElementById('addTypePfBtn').classList.toggle('active', mode === 'portfolio');
+  document.getElementById('addTypeWlBtn').classList.toggle('active', mode === 'watchlist');
+  document.getElementById('addInvestFields').style.display = mode === 'watchlist' ? 'none' : '';
+  document.getElementById('addBtn').textContent = mode === 'watchlist' ? 'Add to Watchlist' : 'Add to Portfolio';
+}
 function openAddSheet() {
   document.getElementById('addSheet').classList.add('open');
   setTimeout(() => document.getElementById('symSearch').focus(), 200);
@@ -1181,29 +1215,39 @@ function closeAddSheet() {
   document.getElementById('addSheet').classList.remove('open');
   clearSym();
   ['fBuyPrice', 'fQty', 'fDate'].forEach(id => document.getElementById(id).value = '');
+  if (addMode !== 'portfolio') setAddMode('portfolio');
 }
 
 function addHolding() {
   if (!selectedSym) return;
-  const bp  = parseFloat(document.getElementById('fBuyPrice').value);
-  const qty = parseFloat(document.getElementById('fQty').value);
-  if (!bp || bp <= 0 || !qty || qty <= 0) { showToast('Enter valid price and quantity'); return; }
+  const isWatch = addMode === 'watchlist';
+  let bp = 0, qty = 0;
+  if (!isWatch) {
+    bp  = parseFloat(document.getElementById('fBuyPrice').value);
+    qty = parseFloat(document.getElementById('fQty').value);
+    if (!bp || bp <= 0 || !qty || qty <= 0) { showToast('Enter valid price and quantity'); return; }
+  }
 
   const sym        = selectedSym.yf_symbol;
   const symDisplay = selectedSym.symbol; // capture before closeAddSheet() nulls selectedSym
-  portfolio.push({
+  const entry = {
     id:        Date.now(),
     symbol:    selectedSym.symbol,
     yf_symbol: sym,
     name:      selectedSym.name,
     exchange:  selectedSym.exchange,
-    buy_price: bp,
-    qty,
-    buy_date:  document.getElementById('fDate').value || '',
-  });
+  };
+  if (isWatch) {
+    entry.watch = true;
+  } else {
+    entry.buy_price = bp;
+    entry.qty       = qty;
+    entry.buy_date  = document.getElementById('fDate').value || '';
+  }
+  portfolio.push(entry);
   savePortfolio();
   closeAddSheet();
-  showToast('Added ' + symDisplay);
+  showToast('Added ' + symDisplay + (isWatch ? ' to Watchlist' : ''));
 
   // Render immediately with "Fetching…" pill — no wait
   fetchingSyms.add(sym);
@@ -1246,18 +1290,22 @@ function addHolding() {
 async function _fetchQuoteOnly(yf_symbol) {
   const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
     encodeURIComponent(yf_symbol) +
-    '&fields=regularMarketPrice,currency&corsDomain=finance.yahoo.com';
+    '&fields=regularMarketPrice,currency,trailingAnnualDividendYield&corsDomain=finance.yahoo.com';
   const res  = await proxyFetch(url);
   const data = await res.json();
   const q    = data?.quoteResponse?.result?.[0];
   if (!q || q.regularMarketPrice == null) throw new Error('empty quote');
+  const rawDiv = q.trailingAnnualDividendYield;
   return {
-    price:    parseFloat(q.regularMarketPrice.toFixed(2)),
-    pct_1w:   null,
-    pct_1m:   null,
-    pct_3m:   null,
-    pct_1y:   null,
-    currency: q.currency === 'INR' ? '₹' : (q.currency || '₹'),
+    price:     parseFloat(q.regularMarketPrice.toFixed(2)),
+    pct_1d:    null,
+    pct_1w:    null,
+    pct_1m:    null,
+    pct_3m:    null,
+    pct_6m:    null,
+    pct_1y:    null,
+    div_yield: rawDiv != null ? parseFloat((rawDiv * 100).toFixed(2)) : null,
+    currency:  q.currency === 'INR' ? '₹' : (q.currency || '₹'),
     _quoteOnly: true,   // flag so card can show "price only" indicator
   };
 }
@@ -1289,12 +1337,15 @@ async function fetchLive(yf_symbol) {
     }
 
     return {
-      price:   parseFloat(cur.toFixed(2)),
-      pct_1w:  pctAt(7),
-      pct_1m:  pctAt(30),
-      pct_3m:  pctAt(90),
-      pct_1y:  pctAt(365),
-      currency: meta.currency || '₹',
+      price:     parseFloat(cur.toFixed(2)),
+      pct_1d:    pctAt(1),
+      pct_1w:    pctAt(7),
+      pct_1m:    pctAt(30),
+      pct_3m:    pctAt(90),
+      pct_6m:    pctAt(182),
+      pct_1y:    pctAt(365),
+      div_yield: null,   // filled later by batch dividend fetch in refreshAll
+      currency:  meta.currency || '₹',
     };
   } catch {
     // ── Fallback: v7/quote (price only — works when chart endpoint is overloaded) ──
@@ -1392,6 +1443,25 @@ async function refreshAll(mode = 'all') {
     const stillFailed = toFetch.filter(s => !liveData[s]);
     stillFailed.forEach(s => failedSyms.add(s));
     const okCount   = toFetch.length - stillFailed.length;
+
+    // ── Best-effort: batch-fetch dividend yields via v7/quote ──
+    // One request for all symbols; totally optional — silently skip if fails.
+    const symsForDiv = toFetch.filter(s => liveData[s] && liveData[s].div_yield == null);
+    if (symsForDiv.length > 0) {
+      try {
+        const divUrl = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
+          encodeURIComponent(symsForDiv.join(',')) +
+          '&fields=trailingAnnualDividendYield&corsDomain=finance.yahoo.com';
+        const divRes  = await proxyFetch(divUrl);
+        const divData = await divRes.json();
+        (divData?.quoteResponse?.result || []).forEach(q => {
+          if (liveData[q.symbol] && q.trailingAnnualDividendYield != null) {
+            liveData[q.symbol].div_yield = parseFloat((q.trailingAnnualDividendYield * 100).toFixed(2));
+          }
+        });
+      } catch { /* dividend yield is optional — ignore failures */ }
+    }
+
     saveLiveCache();
     updateCacheBanner({ ok: okCount, fail: stillFailed.length }); // accurate result banner
   } else {
@@ -1465,8 +1535,93 @@ async function refreshOne(yfSym, evt) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Portfolio Render
 // ─────────────────────────────────────────────────────────────────────────────
+/** Build perf pills HTML for a live-data object. */
+function buildPillsHtml(d, isStale) {
+  const PERF = [['1D','pct_1d'],['1W','pct_1w'],['1M','pct_1m'],['3M','pct_3m'],['6M','pct_6m'],['1Y','pct_1y']];
+  let pills = PERF.map(([lbl, key]) => {
+    const v = d[key];
+    if (v == null) return `<span class="perf-pill na${isStale ? ' stale' : ''}">${lbl} —</span>`;
+    return `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}${isStale ? ' stale' : ''}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`;
+  }).join('');
+  if (d.div_yield != null && d.div_yield > 0)
+    pills += `<span class="perf-pill info" title="Trailing annual dividend yield">Div ${d.div_yield}%</span>`;
+  if (d._quoteOnly)
+    pills += '<span class="perf-pill warn" title="Chart API blocked — price only; %% on next refresh">~ price only</span>';
+  return pills;
+}
+
+/** Build the delete-reveal + swipe card HTML for a single holding/watchlist entry. */
+function buildCard(h) {
+  const d          = liveData[h.yf_symbol];
+  const isWatch    = !!h.watch;
+  const initials   = h.symbol.replace(/\.(NS|BO)$/i, '').slice(0, 3);
+  const priceHtml  = d ? fmt(d.price) : '<span style="color:var(--muted)">—</span>';
+
+  let midHtml;
+  if (isWatch) {
+    midHtml = `<div class="hc-mid">
+        <span class="hc-name">${h.name || ''}</span>
+        <span class="perf-pill info" style="font-size:9px;padding:2px 5px">Watch</span>
+      </div>`;
+  } else {
+    const invested = h.buy_price * h.qty;
+    const curVal   = d ? d.price * h.qty : invested;
+    const pl       = curVal - invested;
+    const plPct    = invested ? pl / invested * 100 : 0;
+    const plHtml   = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
+    midHtml = `<div class="hc-mid">
+        <span class="hc-name">${h.name || ''}</span>
+        <span class="hc-pl" id="hcpl-${h.id}">${plHtml}</span>
+      </div>`;
+  }
+
+  let pills;
+  if (isSgb(h.yf_symbol)) {
+    pills = '<span class="perf-pill na" title="Sovereign Gold Bonds are not supported by Yahoo Finance">SGB · not supported</span>';
+  } else if (fetchingSyms.has(h.yf_symbol)) {
+    pills = '<span class="perf-pill na">⟳ Fetching…</span>';
+  } else if (d && !d._cacheTs) {
+    pills = buildPillsHtml(d, false);
+  } else if (d && d._cacheTs) {
+    const ageStr = cacheAgeStr(Date.now() - d._cacheTs);
+    pills = buildPillsHtml(d, true);
+    pills += `<span class="perf-pill cache-lbl" title="Live fetch failed — showing cached prices from ${ageStr}">📦 ${ageStr}</span>`;
+  } else if (failedSyms.has(h.yf_symbol)) {
+    pills = `<span class="perf-pill err" onclick="refreshOne('${h.yf_symbol}',event)" title="All proxies failed — tap to retry">✕ Unavailable · Retry ↺</span>`;
+  } else {
+    pills = '<span class="perf-pill na">— awaiting data</span>';
+  }
+
+  return `<div class="swipe-wrap" id="sw-${h.id}">
+    <div class="delete-reveal" onclick="confirmDelete(${h.id},'${esc(h.symbol)}')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+        <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+      </svg>
+      <span>Delete</span>
+    </div>
+    <div class="swipe-item holding-card" data-id="${h.id}" onclick="handleCardClick(${h.id},this)">
+      <div class="hc-icon">${initials}</div>
+      <div class="hc-body">
+        <div class="hc-top">
+          <span class="hc-symbol">${h.symbol}</span>
+          <span class="hc-price" id="hcp-${h.id}">${priceHtml}</span>
+        </div>
+        ${midHtml}
+        <div class="hc-perfs-row">
+          <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
+          ${isSgb(h.yf_symbol) ? '' : `<button class="card-refresh-btn" id="hcrb-${h.id}" onclick="refreshOne('${h.yf_symbol}',event)" title="Refresh this stock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>`}
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderPortfolio() {
-  const list = document.getElementById('holdingsList');
+  const list     = document.getElementById('holdingsList');
+  const holdings = portfolio.filter(h => !h.watch);
+  const watchlist = portfolio.filter(h => h.watch);
 
   if (portfolio.length === 0) {
     list.innerHTML = `<div class="empty-state">
@@ -1482,89 +1637,18 @@ function renderPortfolio() {
     return;
   }
 
-  list.innerHTML = portfolio.map(h => {
-    const d        = liveData[h.yf_symbol];
-    const invested = h.buy_price * h.qty;
-    const curVal   = d ? d.price * h.qty : invested;
-    const pl       = curVal - invested;
-    const plPct    = invested ? pl / invested * 100 : 0;
+  let html = holdings.map(buildCard).join('');
 
-    const priceHtml = d
-      ? fmt(d.price)
-      : '<span style="color:var(--muted)">—</span>';
-    const plHtml = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
-
-    let pills;
-    if (isSgb(h.yf_symbol)) {
-      // ── SGB: not supported by Yahoo Finance ──────────────────────────────
-      pills = '<span class="perf-pill na" title="Sovereign Gold Bonds are not supported by Yahoo Finance">SGB · not supported</span>';
-
-    } else if (fetchingSyms.has(h.yf_symbol)) {
-      // ── Actively fetching right now ──────────────────────────────────────
-      pills = '<span class="perf-pill na">⟳ Fetching…</span>';
-
-    } else if (d && !d._cacheTs) {
-      // ── L1 / L2: Fresh data fetched this session ─────────────────────────
-      pills = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
-        .map(([lbl, v]) => v == null
-          ? `<span class="perf-pill na">${lbl} —</span>`
-          : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
-        .join('');
-      if (d._quoteOnly) {
-        // L2: chart was blocked, v7/quote fallback gave price only
-        pills += '<span class="perf-pill warn" title="Chart API blocked by proxy — got price only via fallback. %% will load on next full refresh.">~ price only</span>';
-      }
-
-    } else if (d && d._cacheTs) {
-      // ── L3: Fetch failed this session — showing stale cached data ─────────
-      const ageStr = cacheAgeStr(Date.now() - d._cacheTs);
-      pills = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
-        .map(([lbl, v]) => v == null
-          ? `<span class="perf-pill na stale">${lbl} —</span>`
-          : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'} stale">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
-        .join('');
-      pills += `<span class="perf-pill cache-lbl" title="Live fetch failed — showing cached prices from ${ageStr}">📦 ${ageStr}</span>`;
-
-    } else if (failedSyms.has(h.yf_symbol)) {
-      // ── L4: All retries exhausted, no data at all ────────────────────────
-      pills = `<span class="perf-pill err" onclick="refreshOne('${h.yf_symbol}',event)" title="All proxies failed — tap to retry">✕ Unavailable · Retry ↺</span>`;
-
-    } else {
-      // First open, no cache, not yet fetched
-      pills = '<span class="perf-pill na">— awaiting data</span>';
-    }
-
-    const initials = h.symbol.replace(/\.(NS|BO)$/i, '').slice(0, 3);
-
-    return `<div class="swipe-wrap" id="sw-${h.id}">
-      <div class="delete-reveal" onclick="confirmDelete(${h.id},'${esc(h.symbol)}')">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="3 6 5 6 21 6"/>
-          <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-          <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
-        </svg>
-        <span>Delete</span>
-      </div>
-      <div class="swipe-item holding-card" data-id="${h.id}" onclick="handleCardClick(${h.id},this)">
-        <div class="hc-icon">${initials}</div>
-        <div class="hc-body">
-          <div class="hc-top">
-            <span class="hc-symbol">${h.symbol}</span>
-            <span class="hc-price" id="hcp-${h.id}">${priceHtml}</span>
-          </div>
-          <div class="hc-mid">
-            <span class="hc-name">${h.name || ''}</span>
-            <span class="hc-pl" id="hcpl-${h.id}">${plHtml}</span>
-          </div>
-          <div class="hc-perfs-row">
-            <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
-            ${isSgb(h.yf_symbol) ? '' : `<button class="card-refresh-btn" id="hcrb-${h.id}" onclick="refreshOne('${h.yf_symbol}',event)" title="Refresh this stock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>`}
-          </div>
-        </div>
-      </div>
+  if (watchlist.length > 0) {
+    html += `<div class="wl-divider">
+      <div class="wl-divider-line"></div>
+      <span class="wl-divider-label">Watchlist</span>
+      <div class="wl-divider-line"></div>
     </div>`;
-  }).join('');
+    html += watchlist.map(buildCard).join('');
+  }
 
+  list.innerHTML = html;
   updateSummary();
   initSwipes();
 }
@@ -1575,31 +1659,26 @@ function renderPortfolio() {
 function updateCard(id) {
   const h = portfolio.find(x => x.id === id);
   if (!h) return;
-  const d        = liveData[h.yf_symbol];
-  const invested = h.buy_price * h.qty;
-  const curVal   = d ? d.price * h.qty : invested;
-  const pl       = curVal - invested;
-  const plPct    = invested ? pl / invested * 100 : 0;
-
+  const d       = liveData[h.yf_symbol];
   const priceEl = document.getElementById(`hcp-${id}`);
-  const plEl    = document.getElementById(`hcpl-${id}`);
   const perfEl  = document.getElementById(`hcperf-${id}`);
   if (!priceEl) return; // card not in DOM yet
 
-  priceEl.innerHTML = d
-    ? fmt(d.price)
-    : '<span style="color:var(--muted)">—</span>';
+  priceEl.innerHTML = d ? fmt(d.price) : '<span style="color:var(--muted)">—</span>';
 
-  plEl.innerHTML = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
+  if (!h.watch) {
+    const invested = h.buy_price * h.qty;
+    const curVal   = d ? d.price * h.qty : invested;
+    const pl       = curVal - invested;
+    const plPct    = invested ? pl / invested * 100 : 0;
+    const plEl     = document.getElementById(`hcpl-${id}`);
+    if (plEl) plEl.innerHTML = `<span class="${pl >= 0 ? 'pos' : 'neg'}">${pl >= 0 ? '+' : ''}${fmt(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(1)}%)</span>`;
+  }
 
   if (isSgb(h.yf_symbol)) {
     perfEl.innerHTML = '<span class="perf-pill na" title="Sovereign Gold Bonds are not supported by Yahoo Finance">SGB · not supported</span>';
   } else if (d) {
-    perfEl.innerHTML = [['1W', d.pct_1w], ['1M', d.pct_1m], ['3M', d.pct_3m], ['1Y', d.pct_1y]]
-      .map(([lbl, v]) => v == null
-        ? `<span class="perf-pill na">${lbl} —</span>`
-        : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
-      .join('');
+    perfEl.innerHTML = buildPillsHtml(d, !!d._cacheTs);
   } else if (!fetchingSyms.has(h.yf_symbol)) {
     perfEl.innerHTML = '<span class="perf-pill na">— no data</span>';
   }
@@ -1607,9 +1686,18 @@ function updateCard(id) {
 }
 
 function updateSummary() {
-  if (portfolio.length === 0) return;
+  const holdings = portfolio.filter(h => !h.watch);
+  if (holdings.length === 0) {
+    ['sumInvested','sumCurrent','sumPL','sumReturn'].forEach((id, i) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = i < 3 ? '₹0' : '0%';
+      el.className = 'sum-val';
+    });
+    return;
+  }
   let inv = 0, cur = 0;
-  portfolio.forEach(h => {
+  holdings.forEach(h => {
     const d = liveData[h.yf_symbol];
     inv += h.buy_price * h.qty;
     cur += d ? d.price * h.qty : h.buy_price * h.qty;
@@ -1710,30 +1798,10 @@ function renderAnalytics() {
   if (!tbody) return;
 
   if (portfolio.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:48px 20px">
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--muted);padding:48px 20px">
       Add holdings to see performance analytics</td></tr>`;
     updateSortHeaders(); return;
   }
-
-  const rows = portfolio.map(h => {
-    const d = liveData[h.yf_symbol];
-    const invested = h.buy_price * h.qty;
-    const curVal   = d ? d.price * h.qty : null;
-    const pl_pct   = curVal != null && invested ? (curVal - invested) / invested * 100 : null;
-    return { h, d, invested, curVal, pl_pct };
-  });
-
-  rows.sort((a, b) => {
-    if (sortCol === 'symbol') return sortDir * a.h.symbol.localeCompare(b.h.symbol);
-    const INF = -Infinity;
-    const av = sortCol === 'price' ? (a.d?.price ?? INF) :
-               sortCol === 'value' ? (a.curVal ?? INF) :
-               sortCol === 'pl_pct' ? (a.pl_pct ?? INF) : (a.d?.[sortCol] ?? INF);
-    const bv = sortCol === 'price' ? (b.d?.price ?? INF) :
-               sortCol === 'value' ? (b.curVal ?? INF) :
-               sortCol === 'pl_pct' ? (b.pl_pct ?? INF) : (b.d?.[sortCol] ?? INF);
-    return sortDir * (av - bv);
-  });
 
   function pctCell(v) {
     if (v == null) return '<span class="pct-na">—</span>';
@@ -1741,20 +1809,62 @@ function renderAnalytics() {
     return `<span class="${cls}">${v >= 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
   }
 
-  tbody.innerHTML = rows.map(({ h, d, curVal, pl_pct }) => `
-    <tr onclick="openDetail(${h.id})">
+  function buildRow({ h, d, curVal, pl_pct }) {
+    return `<tr onclick="openDetail(${h.id})">
       <td>
         <span class="td-sym">${h.symbol}</span>
         <span class="td-name">${h.name || ''}</span>
       </td>
       <td class="price-cell">${d ? '₹' + d.price.toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
       <td class="val-cell">${curVal != null ? '₹' + Math.round(curVal).toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
+      <td>${pctCell(d?.pct_1d)}</td>
       <td>${pctCell(d?.pct_1w)}</td>
       <td>${pctCell(d?.pct_1m)}</td>
       <td>${pctCell(d?.pct_3m)}</td>
+      <td>${pctCell(d?.pct_6m)}</td>
       <td>${pctCell(d?.pct_1y)}</td>
+      <td>${pctCell(d?.div_yield)}</td>
       <td>${pctCell(pl_pct)}</td>
-    </tr>`).join('');
+    </tr>`;
+  }
+
+  function makeRow(h) {
+    const d = liveData[h.yf_symbol];
+    if (h.watch) {
+      return { h, d, curVal: null, pl_pct: null };
+    }
+    const invested = h.buy_price * h.qty;
+    const curVal   = d ? d.price * h.qty : null;
+    const pl_pct   = curVal != null && invested ? (curVal - invested) / invested * 100 : null;
+    return { h, d, invested, curVal, pl_pct };
+  }
+
+  function sortRows(rows) {
+    return rows.sort((a, b) => {
+      if (sortCol === 'symbol') return sortDir * a.h.symbol.localeCompare(b.h.symbol);
+      const INF = -Infinity;
+      const av = sortCol === 'price' ? (a.d?.price ?? INF) :
+                 sortCol === 'value' ? (a.curVal ?? INF) :
+                 sortCol === 'pl_pct' ? (a.pl_pct ?? INF) : (a.d?.[sortCol] ?? INF);
+      const bv = sortCol === 'price' ? (b.d?.price ?? INF) :
+                 sortCol === 'value' ? (b.curVal ?? INF) :
+                 sortCol === 'pl_pct' ? (b.pl_pct ?? INF) : (b.d?.[sortCol] ?? INF);
+      return sortDir * (av - bv);
+    });
+  }
+
+  const pfRows = sortRows(portfolio.filter(h => !h.watch).map(makeRow));
+  const wlRows = sortRows(portfolio.filter(h => h.watch).map(makeRow));
+
+  const SEP_COLSPAN = 11;
+  let html = pfRows.map(buildRow).join('');
+  if (wlRows.length > 0) {
+    html += `<tr><td colspan="${SEP_COLSPAN}" style="padding:8px 10px;background:var(--bg2);border-top:1px solid var(--border)">
+      <span style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em">Watchlist</span>
+    </td></tr>`;
+    html += wlRows.map(buildRow).join('');
+  }
+  tbody.innerHTML = html;
 
   updateSortHeaders();
 }
@@ -1766,7 +1876,7 @@ function sortTable(col) {
 }
 
 function updateSortHeaders() {
-  const cols = ['symbol','price','value','pct_1w','pct_1m','pct_3m','pct_1y','pl_pct'];
+  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','div_yield','pl_pct'];
   document.querySelectorAll('#perfTable th').forEach((th, i) => {
     th.classList.remove('sort-asc', 'sort-desc');
     if (cols[i] === sortCol) th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
@@ -1780,11 +1890,8 @@ function openDetail(id) {
   resetAllSwipes();
   const h = portfolio.find(x => x.id === id);
   if (!h) return;
-  const d        = liveData[h.yf_symbol];
-  const invested = h.buy_price * h.qty;
-  const curVal   = d ? d.price * h.qty : invested;
-  const pl       = curVal - invested;
-  const plPct    = invested ? pl / invested * 100 : 0;
+  const d       = liveData[h.yf_symbol];
+  const isWatch = !!h.watch;
 
   function perfRow(label, key) {
     const v   = d?.[key];
@@ -1801,6 +1908,29 @@ function openDetail(id) {
     <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
     <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
 
+  let plHtml = '';
+  let metaHtml = '';
+  if (!isWatch) {
+    const invested = h.buy_price * h.qty;
+    const curVal   = d ? d.price * h.qty : invested;
+    const pl       = curVal - invested;
+    const plPct    = invested ? pl / invested * 100 : 0;
+    plHtml = `<div class="detail-pl ${pl >= 0 ? 'pos' : 'neg'}">
+        ${pl >= 0 ? '+' : ''}${fmtC(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%)
+      </div>`;
+    metaHtml = `<div class="detail-meta">
+      <div class="meta-row"><span class="meta-key">Quantity</span><span class="meta-val">${h.qty}</span></div>
+      <div class="meta-row"><span class="meta-key">Buy Price</span><span class="meta-val">${fmtC(h.buy_price)}</span></div>
+      <div class="meta-row"><span class="meta-key">Invested</span><span class="meta-val">${fmtC(invested)}</span></div>
+      <div class="meta-row"><span class="meta-key">Current Value</span><span class="meta-val">${fmtC(curVal)}</span></div>
+      ${h.buy_date ? `<div class="meta-row"><span class="meta-key">Buy Date</span><span class="meta-val">${h.buy_date}</span></div>` : ''}
+    </div>`;
+  }
+
+  const divRow = d?.div_yield != null && d.div_yield > 0
+    ? `<div class="perf-cell"><div class="perf-cell-label">Div Yield</div><div class="perf-cell-val pos">${d.div_yield}%</div></div>`
+    : '';
+
   document.getElementById('detailSheetBody').innerHTML = `
     <div class="sheet-handle"></div>
     <div class="sheet-header">
@@ -1808,27 +1938,21 @@ function openDetail(id) {
       <button class="sheet-close" onclick="closeDetail()">✕</button>
     </div>
     <div class="detail-header">
-      <div class="detail-sym">${h.symbol}</div>
+      <div class="detail-sym">${h.symbol}${isWatch ? ' <span style="font-size:11px;color:var(--accent)">Watchlist</span>' : ''}</div>
       <div class="detail-name">${h.name || ''} · ${EXCH_DISPLAY[h.exchange] || h.exchange || ''}</div>
       <div class="detail-price">${d ? fmtC(d.price) : '—'}</div>
-      <div class="detail-pl ${pl >= 0 ? 'pos' : 'neg'}">
-        ${pl >= 0 ? '+' : ''}${fmtC(pl)} (${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%)
-      </div>
+      ${plHtml}
     </div>
     <div class="perf-grid">
-      ${perfRow('1 Week','pct_1w')}${perfRow('1 Month','pct_1m')}
-      ${perfRow('3 Months','pct_3m')}${perfRow('1 Year','pct_1y')}
+      ${perfRow('1 Day','pct_1d')}${perfRow('1 Week','pct_1w')}
+      ${perfRow('1 Month','pct_1m')}${perfRow('3 Months','pct_3m')}
+      ${perfRow('6 Months','pct_6m')}${perfRow('1 Year','pct_1y')}
+      ${divRow}
     </div>
-    <div class="detail-meta">
-      <div class="meta-row"><span class="meta-key">Quantity</span><span class="meta-val">${h.qty}</span></div>
-      <div class="meta-row"><span class="meta-key">Buy Price</span><span class="meta-val">${fmtC(h.buy_price)}</span></div>
-      <div class="meta-row"><span class="meta-key">Invested</span><span class="meta-val">${fmtC(invested)}</span></div>
-      <div class="meta-row"><span class="meta-key">Current Value</span><span class="meta-val">${fmtC(curVal)}</span></div>
-      ${h.buy_date ? `<div class="meta-row"><span class="meta-key">Buy Date</span><span class="meta-val">${h.buy_date}</span></div>` : ''}
-    </div>
+    ${metaHtml}
     <div class="detail-actions">
       <button class="btn-del" onclick="confirmDelete(${id},'${esc(h.symbol)}')">
-        ${delIcon} Remove Holding
+        ${delIcon} ${isWatch ? 'Remove from Watchlist' : 'Remove Holding'}
       </button>
     </div>`;
   document.getElementById('detailSheet').classList.add('open');
@@ -1841,9 +1965,11 @@ function closeDetail() { document.getElementById('detailSheet').classList.remove
 // ─────────────────────────────────────────────────────────────────────────────
 function confirmDelete(id, sym) {
   closeDetail();
+  const h = portfolio.find(x => x.id === id);
   document.getElementById('confirmTitle').textContent = `Remove ${sym}?`;
-  document.getElementById('confirmMsg').textContent =
-    'This holding will be permanently removed from your portfolio.';
+  document.getElementById('confirmMsg').textContent = h?.watch
+    ? 'This stock will be removed from your watchlist.'
+    : 'This holding will be permanently removed from your portfolio.';
   document.getElementById('confirmOk').onclick = () => { closeConfirm(); deleteHolding(id); };
   document.getElementById('confirmDialog').classList.add('open');
 }
@@ -1863,20 +1989,22 @@ function deleteHolding(id) {
 //  CSV Export / Import
 // ─────────────────────────────────────────────────────────────────────────────
 function exportCSV() {
-  const headers = ['Symbol','YF Symbol','Name','Exchange','Buy Price','Quantity','Buy Date',
-                   'Current Price','Current Value','P&L','P&L %','1W %','1M %','3M %','1Y %'];
+  const headers = ['Type','Symbol','YF Symbol','Name','Exchange','Buy Price','Quantity','Buy Date',
+                   'Current Price','Current Value','P&L','P&L %','1D %','1W %','1M %','3M %','6M %','1Y %','Div %'];
   const rows = portfolio.map(h => {
     const d   = liveData[h.yf_symbol];
-    const inv = h.buy_price * h.qty;
-    const cur = d ? d.price * h.qty : '';
+    const inv = h.watch ? '' : h.buy_price * h.qty;
+    const cur = d && !h.watch ? d.price * h.qty : '';
     const pl  = cur !== '' ? cur - inv : '';
     const plp = inv && pl !== '' ? (pl / inv * 100).toFixed(2) : '';
     return [
+      h.watch ? 'Watchlist' : 'Portfolio',
       h.symbol, h.yf_symbol, h.name, h.exchange,
-      h.buy_price, h.qty, h.buy_date,
+      h.watch ? '' : h.buy_price, h.watch ? '' : h.qty, h.buy_date ?? '',
       d?.price ?? '', cur !== '' ? cur.toFixed(2) : '',
       pl !== '' ? pl.toFixed(2) : '', plp,
-      d?.pct_1w ?? '', d?.pct_1m ?? '', d?.pct_3m ?? '', d?.pct_1y ?? '',
+      d?.pct_1d ?? '', d?.pct_1w ?? '', d?.pct_1m ?? '', d?.pct_3m ?? '', d?.pct_6m ?? '', d?.pct_1y ?? '',
+      d?.div_yield ?? '',
     ];
   });
   const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
