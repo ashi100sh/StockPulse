@@ -769,7 +769,8 @@ function addHolding() {
   const qty = parseFloat(document.getElementById('fQty').value);
   if (!bp || bp <= 0 || !qty || qty <= 0) { showToast('Enter valid price and quantity'); return; }
 
-  const sym = selectedSym.yf_symbol;
+  const sym        = selectedSym.yf_symbol;
+  const symDisplay = selectedSym.symbol; // capture before closeAddSheet() nulls selectedSym
   portfolio.push({
     id:        Date.now(),
     symbol:    selectedSym.symbol,
@@ -782,7 +783,7 @@ function addHolding() {
   });
   savePortfolio();
   closeAddSheet();
-  showToast('Added ' + selectedSym.symbol);
+  showToast('Added ' + symDisplay);
 
   // Render immediately with "Fetching…" pill — no wait
   fetchingSyms.add(sym);
