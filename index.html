@@ -119,7 +119,13 @@
     .hc-name { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden;
                text-overflow:ellipsis; max-width:160px; }
     .hc-pl { font-size:12px; font-weight:700; }
-    .hc-perfs { display:flex; gap:5px; margin-top:6px; flex-wrap:wrap; }
+    .hc-perfs-row { display:flex; align-items:center; gap:6px; margin-top:6px; }
+    .hc-perfs { display:flex; gap:5px; flex-wrap:wrap; flex:1; }
+    .card-refresh-btn { background:none; border:none; padding:3px; cursor:pointer;
+      color:var(--muted); opacity:0.5; flex-shrink:0; line-height:0;
+      border-radius:50%; transition:opacity 0.15s; }
+    .card-refresh-btn:hover { opacity:1; color:var(--accent); }
+    .card-refresh-btn svg { display:block; }
     .perf-pill { font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; white-space:nowrap; }
     .perf-pill.pos { background:var(--green-dim); color:var(--green); }
     .perf-pill.neg { background:var(--red-dim); color:var(--red); }
@@ -316,6 +322,8 @@
     .version-footer { text-align:center; padding:12px 16px 6px;
                       font-size:11px; color:var(--muted); font-weight:500; }
   </style>
+  <!-- SheetJS: parse .xls / .xlsx files (loaded async; falls back gracefully if offline) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mini.min.js" async></script>
 </head>
 <body>
 <div class="shell">
@@ -385,9 +393,9 @@
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
             <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          Import CSV
+          Import CSV / Excel
         </button>
-        <input type="file" id="csvInput" accept=".csv" style="display:none" onchange="importCSV(this)" />
+        <input type="file" id="csvInput" accept=".csv,.tsv,.xls,.xlsx" style="display:none" onchange="importCSV(this)" />
       </div>
 
       <div class="section-header">
@@ -530,7 +538,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.16';
+const APP_BUILD  = '20260317.17';
 const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -1068,6 +1076,7 @@ async function refreshAll(mode = 'all') {
 
   isRefreshing = true;
   refreshAbort = false;
+  updateRetryBtn(); // hide Retry button while refresh is running
   const btn = document.getElementById('refreshBtn');
 
   /** Fetch one pass over `symbols`; update cards live. */
@@ -1128,8 +1137,43 @@ function updateRetryBtn() {
     .filter(s => !isSgb(s) && !liveData[s]).length;
   const btn = document.getElementById('retryBtn');
   if (!btn) return;
-  btn.style.display = pending > 0 ? '' : 'none';
-  btn.title = `${pending} holding${pending !== 1 ? 's' : ''} missing live data — click to retry`;
+  const show = !isRefreshing && pending > 0;
+  btn.style.display = show ? '' : 'none';
+  if (show) {
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1014.85-3.36L14 8"/></svg> Retry ${pending}`;
+    btn.title = `${pending} holding${pending !== 1 ? 's' : ''} missing live data — click to retry`;
+  }
+}
+
+/**
+ * Refresh a single yf_symbol without affecting the main refresh state.
+ * Preserves old price/perf data on screen until new data arrives.
+ */
+async function refreshOne(yfSym, evt) {
+  if (evt) evt.stopPropagation(); // prevent card click
+  if (fetchingSyms.has(yfSym) || isSgb(yfSym)) return;
+
+  fetchingSyms.add(yfSym);
+  // Mark only the perf area as fetching; price stays as-is
+  portfolio.filter(h => h.yf_symbol === yfSym).forEach(h => {
+    const el = document.getElementById(`hcperf-${h.id}`);
+    if (el) el.innerHTML = '<span class="perf-pill na">⟳ Fetching…</span>';
+    const rb = document.getElementById(`hcrb-${h.id}`);
+    if (rb) rb.style.animation = 'spin 0.7s linear infinite';
+  });
+
+  const d = await fetchLive(yfSym);
+  fetchingSyms.delete(yfSym);
+  if (d) liveData[yfSym] = d;
+
+  portfolio.filter(h => h.yf_symbol === yfSym).forEach(h => {
+    updateCard(h.id);
+    const rb = document.getElementById(`hcrb-${h.id}`);
+    if (rb) rb.style.animation = '';
+  });
+  updateSummary();
+  updateRetryBtn();
+  saveLiveCache();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1142,7 +1186,7 @@ function renderPortfolio() {
     list.innerHTML = `<div class="empty-state">
       <div class="icon">📈</div>
       <p>No holdings yet</p>
-      <small>Tap + to add your first stock or import a CSV from Zerodha / Groww</small>
+      <small>Tap + to add your first stock or import a CSV / Excel file from Zerodha / Groww</small>
     </div>`;
     ['sumInvested','sumCurrent','sumPL','sumReturn'].forEach((id, i) => {
       const el = document.getElementById(id);
@@ -1201,7 +1245,10 @@ function renderPortfolio() {
             <span class="hc-name">${h.name || ''}</span>
             <span class="hc-pl" id="hcpl-${h.id}">${plHtml}</span>
           </div>
-          <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
+          <div class="hc-perfs-row">
+            <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
+            ${isSgb(h.yf_symbol) ? '' : `<button class="card-refresh-btn" id="hcrb-${h.id}" onclick="refreshOne('${h.yf_symbol}',event)" title="Refresh this stock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="11" height="11"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>`}
+          </div>
         </div>
       </div>
     </div>`;
@@ -1530,7 +1577,14 @@ function exportCSV() {
 }
 
 /** Proper RFC-4180 CSV row parser — handles quoted fields with embedded commas/newlines. */
-function parseCSVRow(line) {
+/**
+ * Parse a single CSV/TSV row.
+ * delim defaults to ',' but pass '\t' for tab-separated data.
+ */
+function parseCSVRow(line, delim = ',') {
+  // Fast path for tab-delimited (no quoting needed)
+  if (delim === '\t') return line.split('\t').map(c => c.trim());
+
   const cols = [];
   let cur = '', inQ = false;
   for (let i = 0; i < line.length; i++) {
@@ -1538,7 +1592,7 @@ function parseCSVRow(line) {
     if (ch === '"') {
       if (inQ && line[i + 1] === '"') { cur += '"'; i++; } // escaped ""
       else inQ = !inQ;
-    } else if (ch === ',' && !inQ) {
+    } else if (ch === delim && !inQ) {
       cols.push(cur.trim()); cur = '';
     } else {
       cur += ch;
@@ -1546,6 +1600,13 @@ function parseCSVRow(line) {
   }
   cols.push(cur.trim());
   return cols;
+}
+
+/** Auto-detect whether a line uses tab or comma as delimiter. */
+function detectDelimiter(line) {
+  const tabs   = (line.match(/\t/g) || []).length;
+  const commas = (line.match(/,/g)  || []).length;
+  return tabs > commas ? '\t' : ',';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1607,65 +1668,95 @@ function resolveGeneric(headers) {
   };
 }
 
+/**
+ * Parse CSV/TSV text and import holdings.
+ * Shared by both the CSV reader and the SheetJS Excel path.
+ */
+function processImportText(rawText, inputEl) {
+  const lines = rawText.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    .split('\n').filter(l => l.trim());
+
+  if (lines.length < 2) { showToast('File appears empty or has no data rows'); return; }
+
+  // Auto-detect CSV vs TSV by inspecting the header row
+  const delim = detectDelimiter(lines[0]);
+  const headers = parseCSVRow(lines[0], delim).map(h => h.toLowerCase().trim());
+
+  const profile  = BROKER_PROFILES.find(p => p.detect(headers));
+  const cols_map = profile ? resolveProfile(profile, headers) : resolveGeneric(headers);
+  const { iSym, iBp, iQty, iExch, iName, iDate, defaultExchange } = cols_map;
+  const brokerLabel = profile ? profile.label : 'generic';
+
+  if (iSym === -1 || iBp === -1 || iQty === -1) {
+    const missing = [iSym === -1 && 'symbol', iBp === -1 && 'price', iQty === -1 && 'quantity']
+      .filter(Boolean).join(', ');
+    showToast(`Could not find columns: ${missing}`); return;
+  }
+
+  let added = 0, skipped = 0;
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseCSVRow(lines[i], delim);
+    const get = idx => (idx >= 0 ? (row[idx] || '').replace(/,/g, '') : '');
+    const sym = get(iSym).toUpperCase();
+    const bp  = parseFloat(get(iBp));
+    const qty = parseFloat(get(iQty));
+    if (!sym || isNaN(bp) || bp <= 0 || isNaN(qty) || qty <= 0) { skipped++; continue; }
+    const exch = iExch >= 0 ? get(iExch).toUpperCase() || defaultExchange : defaultExchange;
+    portfolio.push({
+      id:        Date.now() + i,
+      symbol:    sym,
+      yf_symbol: normalizeYfSymbol(sym, exch),
+      name:      iName >= 0 ? get(iName) || sym : sym,
+      exchange:  exch,
+      buy_price: bp,
+      qty,
+      buy_date:  iDate >= 0 ? get(iDate) : '',
+    });
+    added++;
+  }
+
+  if (inputEl) inputEl.value = '';
+  savePortfolio();
+
+  if (added > 0) {
+    showToast(`Imported ${added} holding${added !== 1 ? 's' : ''} · ${brokerLabel}${skipped ? ` (${skipped} skipped)` : ''}`);
+    renderPortfolio();
+    updateRetryBtn();
+    refreshAll('pending');
+  } else {
+    showToast(skipped ? `No valid rows — ${skipped} skipped` : 'Nothing to import');
+  }
+}
+
 function importCSV(input) {
   const file = input.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    const lines = e.target.result
-      .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
-      .split('\n').filter(l => l.trim());
 
-    if (lines.length < 2) { showToast('CSV appears empty or has no data rows'); return; }
-
-    const headers = parseCSVRow(lines[0]).map(h => h.toLowerCase().trim());
-
-    // Auto-detect broker profile; fall back to generic fuzzy matching
-    const profile  = BROKER_PROFILES.find(p => p.detect(headers));
-    const cols_map = profile ? resolveProfile(profile, headers) : resolveGeneric(headers);
-    const { iSym, iBp, iQty, iExch, iName, iDate, defaultExchange } = cols_map;
-    const brokerLabel = profile ? profile.label : 'generic';
-
-    if (iSym === -1 || iBp === -1 || iQty === -1) {
-      const missing = [iSym === -1 && 'symbol', iBp === -1 && 'price', iQty === -1 && 'quantity']
-        .filter(Boolean).join(', ');
-      showToast(`CSV missing columns: ${missing}`); return;
+  const isExcel = /\.(xlsx?|ods)$/i.test(file.name);
+  if (isExcel) {
+    if (typeof XLSX === 'undefined') {
+      showToast('Excel library still loading — try again in a moment');
+      input.value = '';
+      return;
     }
-
-    let added = 0, skipped = 0;
-    for (let i = 1; i < lines.length; i++) {
-      const row = parseCSVRow(lines[i]);
-      const get = idx => (idx >= 0 ? (row[idx] || '').replace(/,/g, '') : '');
-      const sym = get(iSym).toUpperCase();
-      const bp  = parseFloat(get(iBp));
-      const qty = parseFloat(get(iQty));
-      if (!sym || isNaN(bp) || bp <= 0 || isNaN(qty) || qty <= 0) { skipped++; continue; }
-      const exch = iExch >= 0 ? get(iExch).toUpperCase() || defaultExchange : defaultExchange;
-      portfolio.push({
-        id:        Date.now() + i,
-        symbol:    sym,
-        yf_symbol: normalizeYfSymbol(sym, exch),
-        name:      iName >= 0 ? get(iName) || sym : sym,
-        exchange:  exch,
-        buy_price: bp,
-        qty,
-        buy_date:  iDate >= 0 ? get(iDate) : '',
-      });
-      added++;
-    }
-
-    savePortfolio();
-    input.value = '';
-    if (added > 0) {
-      showToast(`Imported ${added} holding${added !== 1 ? 's' : ''} · ${brokerLabel}${skipped ? ` (${skipped} skipped)` : ''}`);
-      renderPortfolio(); // render cards first so updateCard() has DOM targets
-      updateRetryBtn();
-      refreshAll('pending'); // only fetch symbols not yet in liveData
-    } else {
-      showToast(skipped ? `No valid rows — ${skipped} row${skipped !== 1 ? 's' : ''} skipped` : 'Nothing to import');
-    }
-  };
-  reader.readAsText(file);
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb  = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        const ws  = wb.Sheets[wb.SheetNames[0]];
+        const csv = XLSX.utils.sheet_to_csv(ws);
+        processImportText(csv, input);
+      } catch (err) {
+        showToast('Could not read Excel file: ' + (err.message || 'unknown error'));
+        input.value = '';
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  } else {
+    const reader = new FileReader();
+    reader.onload = e => processImportText(e.target.result, input);
+    reader.readAsText(file);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
