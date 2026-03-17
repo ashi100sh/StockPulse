@@ -524,7 +524,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.10';
+const APP_BUILD  = '20260317.11';
 const STALE_MS   = 4 * 60 * 60 * 1000; // 4 h – auto-refresh threshold on PWA open
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -696,7 +696,7 @@ const PROXY_DEFS = [
       : u,
     extract: async r => r.text()
   },
-  // corsproxy.io — URL not encoded (some proxies prefer raw URL)
+  // corsproxy.io — URL not encoded
   {
     make: u => 'https://corsproxy.io/?' + u,
     extract: async r => r.text()
@@ -716,41 +716,48 @@ const PROXY_DEFS = [
     make: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
     extract: async r => r.text()
   },
-  // cors.sh
-  {
-    make: u => 'https://proxy.cors.sh/' + u,
-    extract: async r => r.text()
-  },
-  // corsproxy.org — last resort
-  {
-    make: u => 'https://corsproxy.org/?' + encodeURIComponent(u),
-    extract: async r => r.text()
-  },
 ];
 
-const PROXY_TIMEOUT_MS = 7000; // abort any proxy that doesn't respond within 7s
+const PROXY_TIMEOUT_MS = 7000;
+const PROXY_CACHE_KEY  = 'sp_proxy_idx'; // localStorage: last-known-working proxy index
+
+/** Try a single proxy by index; resolves with Response or rejects. */
+async function _tryOneProxy(rawUrl, idx, timeoutMs) {
+  const { make, extract } = PROXY_DEFS[idx];
+  const ac = new AbortController();
+  const t  = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(make(rawUrl), { signal: ac.signal, cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await extract(res);
+    if (!text) throw new Error('empty response');
+    return new Response(text, { headers: { 'Content-Type': 'application/json' } });
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 async function proxyFetch(rawUrl) {
-  const controllers = PROXY_DEFS.map(() => new AbortController());
+  // Phase 1: try last-known-working proxy first (2.5 s window) — avoids noisy race
+  const preferred = parseInt(localStorage.getItem(PROXY_CACHE_KEY) ?? '-1');
+  if (preferred >= 0 && preferred < PROXY_DEFS.length) {
+    const quick = await _tryOneProxy(rawUrl, preferred, 2500).catch(() => null);
+    if (quick) return quick;
+  }
 
-  // Auto-abort each request after PROXY_TIMEOUT_MS so hanging proxies
-  // don't keep Promise.any waiting forever
-  const timers = controllers.map(c =>
-    setTimeout(() => c.abort(), PROXY_TIMEOUT_MS)
-  );
+  // Phase 2: race all proxies; save the winner for next time
+  const controllers = PROXY_DEFS.map(() => new AbortController());
+  const timers      = controllers.map(c => setTimeout(() => c.abort(), PROXY_TIMEOUT_MS));
 
   const attempts = PROXY_DEFS.map(async ({ make, extract }, i) => {
     try {
-      const res = await fetch(make(rawUrl), {
-        signal: controllers[i].signal,
-        cache: 'no-store',
-      });
+      const res = await fetch(make(rawUrl), { signal: controllers[i].signal, cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const text = await extract(res);
       if (!text) throw new Error('empty response');
-      // Cancel remaining in-flight requests
       controllers.forEach((c, j) => { if (j !== i) c.abort(); });
       timers.forEach(clearTimeout);
+      localStorage.setItem(PROXY_CACHE_KEY, String(i)); // remember winner
       return new Response(text, { headers: { 'Content-Type': 'application/json' } });
     } finally {
       clearTimeout(timers[i]);
@@ -877,8 +884,10 @@ async function searchSymbols(q) {
     results.classList.add('show');
   } catch {
     // All proxies failed — offer "use typed symbol directly" so the user
-    // isn't completely blocked from adding a holding
-    const typedRaw = document.getElementById('symSearch').value.trim();
+    // isn't completely blocked from adding a holding.
+    // Use `q` (the search term that fired this call) not the live DOM value,
+    // which may have been cleared by the time the async catch runs.
+    const typedRaw = q.trim();
     const typed    = typedRaw.toUpperCase();
     if (typed) {
       // Try name→ticker map first, then strip spaces (e.g. "ICICI BANK"→"ICICIBANK")
