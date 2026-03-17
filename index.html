@@ -565,7 +565,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260317.18';
+const APP_BUILD  = '20260317.19';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY  = 'sp_live_v1';        // localStorage key for live-price cache
 const REFRESH_ICO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg> Refresh`;
@@ -770,9 +770,34 @@ const PROXY_DEFS = [
     make: u => 'https://thingproxy.freeboard.io/fetch/' + u,
     extract: async r => r.text()
   },
-  // query2 mirror — Yahoo Finance sometimes responds on query2 when query1 blocks
+  // query2 mirror via corsproxy — Yahoo Finance sometimes responds on query2 when query1 blocks
   {
     make: u => 'https://corsproxy.io/?' + encodeURIComponent(u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com')),
+    extract: async r => r.text()
+  },
+  // proxy.cors.sh — separate IP pool from corsproxy.io
+  {
+    make: u => 'https://proxy.cors.sh/' + u,
+    extract: async r => r.text()
+  },
+  // query2 via allorigins/raw — different host + different proxy
+  {
+    make: u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com')),
+    extract: async r => r.text()
+  },
+  // query2 via thingproxy — thingproxy + query2 combination
+  {
+    make: u => 'https://thingproxy.freeboard.io/fetch/' + u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com'),
+    extract: async r => r.text()
+  },
+  // cors.eu.org — EU-based proxy server, different IP block from US proxies
+  {
+    make: u => 'https://cors.eu.org/' + u,
+    extract: async r => r.text()
+  },
+  // query2 via cors.eu.org — EU + query2 mirror combination
+  {
+    make: u => 'https://cors.eu.org/' + u.replace('query1.finance.yahoo.com', 'query2.finance.yahoo.com'),
     extract: async r => r.text()
   },
 ];
@@ -1142,17 +1167,41 @@ function addHolding() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Live Data
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Fallback: v7/finance/quote — much smaller payload than v8/chart.
+ * Returns price only (no pct_* fields) when the chart endpoint is blocked.
+ */
+async function _fetchQuoteOnly(yf_symbol) {
+  const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
+    encodeURIComponent(yf_symbol) +
+    '&fields=regularMarketPrice,currency&corsDomain=finance.yahoo.com';
+  const res  = await proxyFetch(url);
+  const data = await res.json();
+  const q    = data?.quoteResponse?.result?.[0];
+  if (!q || q.regularMarketPrice == null) throw new Error('empty quote');
+  return {
+    price:    parseFloat(q.regularMarketPrice.toFixed(2)),
+    pct_1w:   null,
+    pct_1m:   null,
+    pct_3m:   null,
+    pct_1y:   null,
+    currency: q.currency === 'INR' ? '₹' : (q.currency || '₹'),
+    _quoteOnly: true,   // flag so card can show "price only" indicator
+  };
+}
+
 async function fetchLive(yf_symbol) {
+  // ── Primary: v8/chart (full 1-year OHLC — gives price + all percentages) ──
   try {
     const url = YF_CHART + encodeURIComponent(yf_symbol) + '?interval=1d&range=1y&corsDomain=finance.yahoo.com';
     const res  = await proxyFetch(url);
     const data = await res.json();
     const result = data?.chart?.result?.[0];
-    if (!result) return null;
+    if (!result) throw new Error('no chart result');
     const closes = result.indicators.quote[0].close;
     const ts     = result.timestamp;
     const valid  = closes.filter(c => c != null);
-    if (!valid.length) return null;
+    if (!valid.length) throw new Error('no closes');
     const cur  = valid[valid.length - 1];
     const meta = result.meta || {};
 
@@ -1175,7 +1224,11 @@ async function fetchLive(yf_symbol) {
       pct_1y:  pctAt(365),
       currency: meta.currency || '₹',
     };
-  } catch { return null; }
+  } catch {
+    // ── Fallback: v7/quote (price only — works when chart endpoint is overloaded) ──
+    try { return await _fetchQuoteOnly(yf_symbol); }
+    catch { return null; }
+  }
 }
 
 /**
@@ -1341,6 +1394,7 @@ function renderPortfolio() {
           ? `<span class="perf-pill na">${lbl} —</span>`
           : `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`)
         .join('');
+      if (d._quoteOnly) pills += '<span class="perf-pill na" title="Performance data unavailable — proxy returned price only">~ price only</span>';
     } else if (fetchingSyms.has(h.yf_symbol)) {
       pills = '<span class="perf-pill na">⟳ Fetching…</span>';
     } else {
