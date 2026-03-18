@@ -900,7 +900,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.44';
+const APP_BUILD  = '20260318.45';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1708,18 +1708,23 @@ function addHolding() {
       if (d) break;
     }
     fetchingSyms.delete(sym);
-    if (d) {
-      delete d._cacheTs; d._fetchedAt = Date.now();
-      if (d.div_yield == null) {
-        try { d.div_yield = await fetchDividendYield(sym); } catch { /* optional */ }
-      }
-      liveData[sym] = d; failedSyms.delete(sym);
-    } else { failedSyms.add(sym); }
+    if (d) { delete d._cacheTs; d._fetchedAt = Date.now(); liveData[sym] = d; failedSyms.delete(sym); }
+    else { failedSyms.add(sym); }
     portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
     updateSummary();
     saveLiveCache();
     updateCacheBanner({ ok: d ? 1 : 0, fail: d ? 0 : 1 });
     if (document.getElementById('page-heatmap').classList.contains('active')) renderAnalytics();
+    // Background dividend fetch — no delay to card render
+    if (d && d.div_yield == null) {
+      fetchDividendYield(sym).then(y => {
+        if (!liveData[sym]) return;
+        liveData[sym].div_yield = y;
+        portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
+        saveLiveCache();
+        if (document.getElementById('page-heatmap').classList.contains('active')) renderAnalytics();
+      }).catch(() => { /* optional */ });
+    }
   })();
 }
 
@@ -2076,14 +2081,10 @@ async function refreshOne(yfSym, evt) {
 
   const d = await fetchLive(yfSym);
   fetchingSyms.delete(yfSym);
-  if (d) {
-    delete d._cacheTs; d._fetchedAt = Date.now();
-    if (d.div_yield == null) {
-      try { d.div_yield = await fetchDividendYield(yfSym); } catch { /* optional */ }
-    }
-    liveData[yfSym] = d; failedSyms.delete(yfSym);
-  } else { failedSyms.add(yfSym); }
+  if (d) { delete d._cacheTs; d._fetchedAt = Date.now(); liveData[yfSym] = d; failedSyms.delete(yfSym); }
+  else    { failedSyms.add(yfSym); }
 
+  // Render immediately — no wait for dividend
   portfolio.filter(h => h.yf_symbol === yfSym).forEach(h => {
     updateCard(h.id);
     const rb = document.getElementById(`hcrb-${h.id}`);
@@ -2093,6 +2094,17 @@ async function refreshOne(yfSym, evt) {
   updateRetryBtn();
   saveLiveCache();
   updateCacheBanner({ ok: d ? 1 : 0, fail: d ? 0 : 1 });
+
+  // Background dividend fetch — updates card/analytics silently when done
+  if (d && d.div_yield == null) {
+    fetchDividendYield(yfSym).then(y => {
+      if (!liveData[yfSym]) return;
+      liveData[yfSym].div_yield = y;
+      portfolio.filter(h => h.yf_symbol === yfSym).forEach(h => updateCard(h.id));
+      saveLiveCache();
+      if (document.getElementById('page-heatmap').classList.contains('active')) renderAnalytics();
+    }).catch(() => { /* optional */ });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
