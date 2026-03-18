@@ -908,7 +908,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.49';
+const APP_BUILD  = '20260318.50';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1280,6 +1280,7 @@ let sortCol = 'value', sortDir = -1;       // analytics portfolio sort state
 let wlSortCol = 'symbol', wlSortDir = -1; // analytics watchlist sort state
 let holdingsSortCol = 'value', holdingsSortDir = -1; // holdings page sort state
 let isRefreshing = false;              // true while sequential refresh is running
+let retryProgress = null;             // { i, total, sym } — set while pending-mode retry runs
 let refreshAbort = false;              // set to true to stop in-progress refresh
 const fetchingSyms = new Set();        // yf_symbols currently being fetched
 
@@ -1883,7 +1884,8 @@ async function refreshAll(mode = 'all', evt = null) {
   // For pending-only retries: clear proxy cache so we race all proxies fresh
   // rather than re-hitting the recently-throttled winner from the previous run.
   if (mode === 'pending') localStorage.removeItem(PROXY_CACHE_KEY);
-  updateRetryBtn(); // hide Retry button while refresh is running
+  if (mode === 'pending') retryProgress = { i: 0, total: toFetch.length, sym: toFetch[0] || '' };
+  updateRetryBtn(); // show retry progress (pending) or hide button (other modes)
   const btn = document.getElementById('refreshBtn');
   btn.onclick = null; // progress indicator only — cancel is handled by cancelBtn
   const cancelBtn = document.getElementById('cancelBtn');
@@ -1898,6 +1900,10 @@ async function refreshAll(mode = 'all', evt = null) {
       btn.innerHTML = SPIN_ICO + ` ${label}${i + 1}/${symbols.length}${suffix}`;
 
       const sym = symbols[i];
+      if (mode === 'pending' && retryProgress) {
+        retryProgress = { i: i + 1, total: symbols.length, sym };
+        updateRetryBtn();
+      }
       fetchingSyms.add(sym);
       portfolio.filter(h => h.yf_symbol === sym).forEach(h => {
         const el = document.getElementById(`hcperf-${h.id}`);
@@ -2018,6 +2024,7 @@ async function refreshAll(mode = 'all', evt = null) {
 
   isRefreshing = false;
   refreshAbort = false;
+  retryProgress = null;
   btn.onclick = e => { if (!e._fromLongPress) refreshAll('all', e); };
   btn.innerHTML = REFRESH_ICO;
   const cancelBtnEnd = document.getElementById('cancelBtn');
@@ -2031,15 +2038,26 @@ async function refreshAll(mode = 'all', evt = null) {
 
 /** Show/hide the "Retry pending" button based on how many fetchable symbols still lack data. */
 function updateRetryBtn() {
-  const pending = [...new Set(portfolio.map(h => h.yf_symbol))]
-    .filter(s => !isSgb(s) && !liveData[s]).length;
+  const pendingSyms = [...new Set(portfolio.map(h => h.yf_symbol))]
+    .filter(s => !isSgb(s) && !liveData[s]);
+  const pending = pendingSyms.length;
   const btn = document.getElementById('retryBtn');
   if (!btn) return;
+  const SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1014.85-3.36L14 8"/></svg>`;
+  // While a pending retry is running — show live symbol progress
+  if (isRefreshing && retryProgress) {
+    const { i, total, sym } = retryProgress;
+    btn.style.display = '';
+    btn.title = `Retrying ${sym}…`;
+    btn.innerHTML = `${SVG} ${i}/${total} ${displaySym(sym)}…`;
+    return;
+  }
   const show = !isRefreshing && pending > 0;
   btn.style.display = show ? '' : 'none';
   if (show) {
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1014.85-3.36L14 8"/></svg> Retry ${pending}`;
-    btn.title = `${pending} holding${pending !== 1 ? 's' : ''} missing live data — click to retry`;
+    const names = pendingSyms.map(displaySym).join(', ');
+    btn.innerHTML = `${SVG} Retry ${pending}`;
+    btn.title = `Missing: ${names} — click to retry`;
   }
 }
 
@@ -2978,10 +2996,11 @@ function processImportText(rawText, inputEl) {
   //   -BL,-BE,-SM,-IL,-BZ,-MT,-SZ  trading restriction markers (e.g. URBANCO-BL)
   //   -RR  REIT units on NSE (e.g. EMBASSY-RR → EMBASSY, traded as EMBASSY.BO on BSE)
   //   -IV  InvIT units on NSE (e.g. PGINVIT-IV → PGINVIT)
+  //   -E   ETF units on NSE  (e.g. GOLDBEES-E → GOLDBEES → GOLDBEES.NS on Yahoo)
   // Strip them so we get the clean ticker for Yahoo Finance lookup.
   // Note: REITs/InvITs are BSE-listed; after stripping the exchange fallback
   // (.NS → .BO) will automatically resolve EMBASSY.NS → EMBASSY.BO.
-  const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|RR|IV)$/i;
+  const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|RR|IV|E)$/i;
 
   for (let i = hdrIdx + 1; i < lines.length; i++) {
     const row = parseCSVRow(lines[i], delim);
