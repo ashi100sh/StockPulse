@@ -202,6 +202,19 @@ test('Only commas → comma', ',', detectDelimiter('A,B,C'));
 test('Only tabs → tab',     '\t', detectDelimiter('A\tB\tC'));
 test('Equal counts → comma', ',', detectDelimiter('A\tB,C'));
 
+/** Pure dividend yield resolution — mirrors fetchDividendYield() field priority. */
+function resolveDivYield(q) {
+  if (!q) return null;
+  const rawYield = q.trailingAnnualDividendYield ?? q.dividendYield ?? q.forwardAnnualDividendYield;
+  if (rawYield != null && rawYield > 0)
+    return parseFloat((rawYield * 100).toFixed(2));
+  const rate  = q.trailingAnnualDividendRate ?? q.forwardAnnualDividendRate;
+  const price = q.regularMarketPrice;
+  if (rate != null && rate > 0 && price > 0)
+    return parseFloat((rate / price * 100).toFixed(2));
+  return 0;
+}
+
 /** Returns the matching entry if sym already in same bucket, else null. */
 function checkDuplicate(portfolio, yfSymbol, isWatch) {
   return portfolio.find(h => h.yf_symbol === yfSymbol && !!h.watch === isWatch) || null;
@@ -308,6 +321,33 @@ function makeProxyFetch(fetchImpl, lsStore, proxyDefs) {
 
   return { proxyFetch, ls };
 }
+
+// ── resolveDivYield (mirrors fetchDividendYield field priority) ───────────────
+console.log('\nresolveDivYield');
+// trailingAnnualDividendYield wins when present
+test('trailing yield → multiplied to %',          3.65, resolveDivYield({ trailingAnnualDividendYield: 0.0365 }));
+// dividendYield (forward in Yahoo API) wins when trailing is absent
+test('dividendYield used when trailing absent',   4.71, resolveDivYield({ dividendYield: 0.0471 }));
+// forwardAnnualDividendYield is last yield fallback
+test('forwardAnnualDividendYield last resort',    2.50, resolveDivYield({ forwardAnnualDividendYield: 0.025 }));
+// trailing > dividendYield > forward priority
+test('trailing wins over dividendYield',          1.00, resolveDivYield({ trailingAnnualDividendYield: 0.01, dividendYield: 0.05 }));
+test('dividendYield wins over forwardYield',      5.00, resolveDivYield({ dividendYield: 0.05, forwardAnnualDividendYield: 0.02 }));
+// rate/price fallback — INFY style: rate=45, price~1230
+test('rate/price fallback (trailingRate)',         parseFloat((45 / 1230 * 100).toFixed(2)),
+  resolveDivYield({ trailingAnnualDividendRate: 45, regularMarketPrice: 1230 }));
+test('forwardAnnualDividendRate fallback',        parseFloat((14.35 / 305 * 100).toFixed(2)),
+  resolveDivYield({ forwardAnnualDividendRate: 14.35, regularMarketPrice: 305 }));
+// trailing rate preferred over forward rate
+test('trailingRate wins over forwardRate',
+  parseFloat((20 / 500 * 100).toFixed(2)),
+  resolveDivYield({ trailingAnnualDividendRate: 20, forwardAnnualDividendRate: 10, regularMarketPrice: 500 }));
+// zero / null yield → 0
+test('all null → 0',                              0, resolveDivYield({}));
+test('yield=0 treated as absent, rate also 0 → 0', 0, resolveDivYield({ trailingAnnualDividendYield: 0, trailingAnnualDividendRate: 0 }));
+test('null q → null',                             null, resolveDivYield(null));
+// price = 0 prevents divide-by-zero
+test('rate present but price=0 → 0',             0, resolveDivYield({ trailingAnnualDividendRate: 45, regularMarketPrice: 0 }));
 
 // ── checkDuplicate ────────────────────────────────────────────────────────────
 console.log('\ncheckDuplicate');
