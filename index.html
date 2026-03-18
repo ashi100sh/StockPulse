@@ -366,9 +366,9 @@
     .perf-table th:last-child  { padding-right:16px; }
     .perf-table th:hover { color:var(--text); }
     .perf-table th.sort-asc  { color:var(--accent); }
-    .perf-table th.sort-asc::after  { content:' ↑'; }
+    .perf-table th.sort-asc::after  { content:' ↓'; }
     .perf-table th.sort-desc { color:var(--accent); }
-    .perf-table th.sort-desc::after { content:' ↓'; }
+    .perf-table th.sort-desc::after { content:' ↑'; }
     .perf-table td { padding:11px 10px; font-size:13px; text-align:right;
                      border-bottom:1px solid var(--border); vertical-align:middle; }
     .perf-table td:first-child { text-align:left; padding-left:16px; min-width:112px;
@@ -417,8 +417,8 @@
       padding:4px 11px; border-radius:20px; cursor:pointer; white-space:nowrap; flex-shrink:0;
       transition:background 0.15s,color 0.15s; }
     .hs-btn.active { background:var(--accent-dim); color:var(--accent); }
-    .hs-btn.asc::after  { content:' ↑'; }
-    .hs-btn.desc::after { content:' ↓'; }
+    .hs-btn.asc::after  { content:' ↓'; }
+    .hs-btn.desc::after { content:' ↑'; }
 
     /* ── Redesigned holding card ── */
     .hc-val { font-weight:800; font-size:15px; letter-spacing:-0.3px; }
@@ -737,8 +737,8 @@
               <th onclick="sortTable('pct_1m')">1M%</th>
               <th onclick="sortTable('pct_3m')">3M%</th>
               <th onclick="sortTable('pct_6m')">6M%</th>
-              <th onclick="sortTable('pct_1y')">1Y%</th>
               <th onclick="sortTable('pct_9m')">9M%</th>
+              <th onclick="sortTable('pct_1y')">1Y%</th>
               <th onclick="sortTable('w52_low')">52W Lo</th>
               <th onclick="sortTable('w52_high')">52W Hi</th>
               <th onclick="sortTable('div_yield')">Div%</th>
@@ -908,7 +908,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.50';
+const APP_BUILD  = '20260318.51';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -2141,7 +2141,7 @@ async function refreshOne(yfSym, evt) {
 // ─────────────────────────────────────────────────────────────────────────────
 /** Build perf pills HTML for a live-data object. */
 function buildPillsHtml(d, isStale) {
-  const PERF = [['1D','pct_1d'],['1W','pct_1w'],['1M','pct_1m'],['3M','pct_3m'],['6M','pct_6m'],['1Y','pct_1y']];
+  const PERF = [['1D','pct_1d'],['1W','pct_1w'],['1M','pct_1m']];
   let pills = PERF.map(([lbl, key]) => {
     const v = d[key];
     if (v == null) return `<span class="perf-pill na${isStale ? ' stale' : ''}">${lbl} —</span>`;
@@ -2248,7 +2248,11 @@ function buildCard(h) {
 }
 
 function setHoldingsSort(col) {
-  holdingsSortDir = holdingsSortCol === col ? -holdingsSortDir : -1;
+  if (holdingsSortCol === col) {
+    holdingsSortDir = -holdingsSortDir;
+  } else {
+    holdingsSortDir = col === 'name' ? 1 : -1; // name: A→Z first; numeric: high first
+  }
   holdingsSortCol = col;
   renderPortfolio();
 }
@@ -2535,8 +2539,8 @@ function renderAnalytics() {
       <td>${pctCell(d?.pct_1m, 10)}</td>
       <td>${pctCell(d?.pct_3m, 15)}</td>
       <td>${pctCell(d?.pct_6m, 20)}</td>
-      <td>${pctCell(d?.pct_1y, 30)}</td>
       <td>${pctCell(d?.pct_9m, 25)}</td>
+      <td>${pctCell(d?.pct_1y, 30)}</td>
       <td class="price-cell">${d?.w52_low  != null ? '₹' + d.w52_low.toLocaleString('en-IN')  : '<span class="pct-na">—</span>'}</td>
       <td class="price-cell">${d?.w52_high != null ? '₹' + d.w52_high.toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
       <td>${pctCell(d?.div_yield, 5)}</td>
@@ -2650,7 +2654,11 @@ function toggleAlloc() {
 }
 
 function sortTable(col) {
-  sortDir = sortCol === col ? -sortDir : -1;
+  if (sortCol === col) {
+    sortDir = -sortDir;
+  } else {
+    sortDir = col === 'symbol' ? 1 : -1; // symbol: A→Z first; numeric: high first
+  }
   sortCol = col;
   renderAnalytics();
 }
@@ -2661,7 +2669,7 @@ function sortWatchlist(col) {
 }
 
 function updateSortHeaders() {
-  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','pct_9m','w52_low','w52_high','div_yield','pl_pct','wt','pl_abs'];
+  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_9m','pct_1y','w52_low','w52_high','div_yield','pl_pct','wt','pl_abs'];
   document.querySelectorAll('#perfTable th').forEach((th, i) => {
     th.classList.remove('sort-asc', 'sort-desc');
     if (cols[i] === sortCol) th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
