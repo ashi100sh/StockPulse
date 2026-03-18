@@ -931,6 +931,14 @@ const NSE_NAME_MAP = (() => {
   add('YESBANK',    'yes bank');
   add('ZOMATO',     'zomato');
   add('ZYDUSLIFE',  'zydus lifesciences', 'zydus');
+  // REITs & InvITs — BSE-listed; exchange fallback handles .NS → .BO
+  add('EMBASSY',    'embassy reit', 'embassy office parks', 'embassy office');
+  add('MINDSPACE',  'mindspace reit', 'mindspace business parks');
+  add('BIRET',      'brookfield reit', 'brookfield india real estate');
+  add('NXST',       'nexus select trust', 'nexus reit');
+  add('PGINVIT',    'powergrid invit', 'power grid invit', 'pginvit');
+  add('IRBINVIT',   'irb invit', 'irb infrastructure trust');
+  add('INDIGRID',   'indigrid', 'sterlite power invit');
   return m;
 })();
 
@@ -2716,9 +2724,14 @@ function processImportText(rawText, inputEl) {
 
   let added = 0, skipped = 0, dupes = 0;
 
-  // Zerodha appends trading-restriction suffixes (e.g. URBANCO-BL, RELIANCE-BE)
+  // Zerodha appends trading-restriction and asset-class suffixes:
+  //   -BL,-BE,-SM,-IL,-BZ,-MT,-SZ  trading restriction markers (e.g. URBANCO-BL)
+  //   -RR  REIT units on NSE (e.g. EMBASSY-RR → EMBASSY, traded as EMBASSY.BO on BSE)
+  //   -IV  InvIT units on NSE (e.g. PGINVIT-IV → PGINVIT)
   // Strip them so we get the clean ticker for Yahoo Finance lookup.
-  const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|IV)$/i;
+  // Note: REITs/InvITs are BSE-listed; after stripping the exchange fallback
+  // (.NS → .BO) will automatically resolve EMBASSY.NS → EMBASSY.BO.
+  const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|RR|IV)$/i;
 
   for (let i = hdrIdx + 1; i < lines.length; i++) {
     const row = parseCSVRow(lines[i], delim);
