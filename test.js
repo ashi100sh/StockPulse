@@ -242,6 +242,21 @@ function buildPillsHtml(d, isStale) {
  * portfolioSummaryCalc — pure math used by updateSummary().
  * Returns { inv, cur } only counting non-watchlist holdings.
  */
+// Mirror of sortRows in index.html — nulls always sink to bottom
+function sortRows(rows, col, dir) {
+  return rows.slice().sort((a, b) => {
+    if (col === 'symbol') return dir * a.h.symbol.localeCompare(b.h.symbol);
+    const MISSING = dir > 0 ? Infinity : -Infinity;
+    const pick = (r, c) =>
+      c === 'price'  ? (r.d?.price  ?? MISSING) :
+      c === 'value'  ? (r.curVal    ?? MISSING) :
+      c === 'pl_pct' ? (r.pl_pct   ?? MISSING) :
+      c === 'pl_abs' ? (r.pl_abs   ?? MISSING) :
+      c === 'wt'     ? (r.wt       ?? MISSING) : (r.d?.[c] ?? MISSING);
+    return dir * (pick(a, col) - pick(b, col));
+  });
+}
+
 function portfolioSummaryCalc(portfolio, liveData) {
   const holdings = portfolio.filter(h => !h.watch);
   let inv = 0, cur = 0;
@@ -557,6 +572,81 @@ await testA('DIRECT_KEY not set + no proxy cache → Phase 2 discovery, direct w
   assert(r._isDirect, 'direct discovery via Phase 2');
   assertEqual('1', ls.sp_direct, 'DIRECT_KEY saved for next time');
 });
+
+// ── sortRows: null-sinks-to-bottom ───────────────────────────────────────────
+// Helper: make a minimal row object
+function mkRow(sym, pct1d, value, plPct) {
+  return { h: { symbol: sym }, d: pct1d != null ? { pct_1d: pct1d } : null,
+           curVal: value ?? null, pl_pct: plPct ?? null, pl_abs: null, wt: null };
+}
+
+// DESC (dir=-1): ↓ arrow → highest pct_1d first, nulls last
+{
+  const rows = [mkRow('A', null), mkRow('B', 2.0), mkRow('C', -1.5), mkRow('D', null), mkRow('E', 5.0)];
+  const sorted = sortRows(rows, 'pct_1d', -1);
+  test('sortRows ↓ pct_1d: first entry is highest value',  'E', sorted[0].h.symbol);
+  test('sortRows ↓ pct_1d: second entry is next highest',  'B', sorted[1].h.symbol);
+  test('sortRows ↓ pct_1d: third entry is negative',       'C', sorted[2].h.symbol);
+  test('sortRows ↓ pct_1d: null sinks to 4th',             true, sorted[3].d == null);
+  test('sortRows ↓ pct_1d: null sinks to last',            true, sorted[4].d == null);
+}
+
+// ASC (dir=1): ↑ arrow → lowest pct_1d first, nulls last (BUG was here: nulls floated to top)
+{
+  const rows = [mkRow('A', null), mkRow('B', 2.0), mkRow('C', -1.5), mkRow('D', 5.0)];
+  const sorted = sortRows(rows, 'pct_1d', 1);
+  test('sortRows ↑ pct_1d: first entry is most negative',    'C', sorted[0].h.symbol);
+  test('sortRows ↑ pct_1d: second entry is positive',        'B', sorted[1].h.symbol);
+  test('sortRows ↑ pct_1d: third entry is highest',          'D', sorted[2].h.symbol);
+  test('sortRows ↑ pct_1d: null sinks to last (not first!)', true, sorted[3].d == null);
+}
+
+// DESC by value: null value sinks to bottom (not top)
+{
+  const rows = [
+    { h:{symbol:'X'}, d:null, curVal:null, pl_pct:null, pl_abs:null, wt:null },
+    { h:{symbol:'Y'}, d:null, curVal:1000, pl_pct:null, pl_abs:null, wt:null },
+    { h:{symbol:'Z'}, d:null, curVal:500,  pl_pct:null, pl_abs:null, wt:null },
+  ];
+  const sorted = sortRows(rows, 'value', -1);
+  test('sortRows ↓ value: highest first',          'Y', sorted[0].h.symbol);
+  test('sortRows ↓ value: second highest',         'Z', sorted[1].h.symbol);
+  test('sortRows ↓ value: null curVal sinks last', 'X', sorted[2].h.symbol);
+}
+
+// ASC by value: null value sinks to bottom (not top)
+{
+  const rows = [
+    { h:{symbol:'X'}, d:null, curVal:null, pl_pct:null, pl_abs:null, wt:null },
+    { h:{symbol:'Y'}, d:null, curVal:1000, pl_pct:null, pl_abs:null, wt:null },
+    { h:{symbol:'Z'}, d:null, curVal:500,  pl_pct:null, pl_abs:null, wt:null },
+  ];
+  const sorted = sortRows(rows, 'value', 1);
+  test('sortRows ↑ value: lowest first',           'Z', sorted[0].h.symbol);
+  test('sortRows ↑ value: highest second',         'Y', sorted[1].h.symbol);
+  test('sortRows ↑ value: null curVal sinks last', 'X', sorted[2].h.symbol);
+}
+
+// Symbol sort (alpha): no null issue, just directional correctness
+{
+  const rows = [mkRow('RELIANCE'), mkRow('HDFCBANK'), mkRow('TCS')];
+  test('sortRows ↓ symbol: Z first', 'TCS',      sortRows(rows, 'symbol', -1)[0].h.symbol);
+  test('sortRows ↑ symbol: A first', 'HDFCBANK', sortRows(rows, 'symbol',  1)[0].h.symbol);
+}
+
+// div_yield null sinks to bottom
+{
+  const mkDivRow = (sym, dy) => ({
+    h: { symbol: sym }, d: { pct_1d: 0, div_yield: dy }, curVal: 100, pl_pct: 0, pl_abs: 0, wt: 1
+  });
+  const rows = [mkDivRow('A', null), mkDivRow('B', 3.5), mkDivRow('C', 1.2)];
+  const descSorted = sortRows(rows, 'div_yield', -1);
+  const ascSorted  = sortRows(rows, 'div_yield',  1);
+  test('sortRows ↓ div_yield: highest first',    'B', descSorted[0].h.symbol);
+  test('sortRows ↓ div_yield: null last',        'A', descSorted[2].h.symbol);
+  test('sortRows ↑ div_yield: lowest first',     'C', ascSorted[0].h.symbol);
+  test('sortRows ↑ div_yield: null last',        'A', ascSorted[2].h.symbol);
+}
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 const total = pass + fail;

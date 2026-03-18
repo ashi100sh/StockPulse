@@ -900,7 +900,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.46';
+const APP_BUILD  = '20260318.47';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -2243,24 +2243,24 @@ function renderPortfolio() {
   const list = document.getElementById('holdingsList');
   const watchlist = portfolio.filter(h => h.watch);
 
-  // Sort portfolio holdings
-  const INF = -Infinity;
+  // Sort portfolio holdings — nulls always sink to bottom (sentinel flips with direction)
+  const MISSING = holdingsSortDir > 0 ? Infinity : -Infinity;
   const holdings = portfolio.filter(h => !h.watch).slice().sort((a, b) => {
     const da = liveData[a.yf_symbol], db = liveData[b.yf_symbol];
     if (holdingsSortCol === 'name') return holdingsSortDir * a.symbol.localeCompare(b.symbol);
     let av, bv;
     if (holdingsSortCol === 'value') {
-      av = da ? da.price * a.qty : INF;  bv = db ? db.price * b.qty : INF;
+      av = da ? da.price * a.qty : MISSING;  bv = db ? db.price * b.qty : MISSING;
     } else if (holdingsSortCol === 'pl_pct') {
       const iA = a.buy_price * a.qty, cA = da ? da.price * a.qty : null;
       const iB = b.buy_price * b.qty, cB = db ? db.price * b.qty : null;
-      av = cA != null ? (cA - iA) / iA * 100 : INF;
-      bv = cB != null ? (cB - iB) / iB * 100 : INF;
+      av = cA != null ? (cA - iA) / iA * 100 : MISSING;
+      bv = cB != null ? (cB - iB) / iB * 100 : MISSING;
     } else if (holdingsSortCol === 'pct_1d') {
-      av = da?.pct_1d ?? INF;  bv = db?.pct_1d ?? INF;
+      av = da?.pct_1d ?? MISSING;  bv = db?.pct_1d ?? MISSING;
     } else if (holdingsSortCol === 'invested') {
       av = a.buy_price * a.qty;  bv = b.buy_price * b.qty;
-    } else { av = INF; bv = INF; }
+    } else { av = MISSING; bv = MISSING; }
     return holdingsSortDir * (av - bv);
   });
 
@@ -2473,13 +2473,16 @@ function renderAnalytics() {
   function sortRows(rows, col, dir) {
     return rows.slice().sort((a, b) => {
       if (col === 'symbol') return dir * a.h.symbol.localeCompare(b.h.symbol);
-      const INF = -Infinity;
+      // Nulls always sink to bottom regardless of direction.
+      // asc (dir=1): MISSING=+Inf → 1*(Inf-x)=+Inf>0 → real before null ✓
+      // desc(dir=-1): MISSING=-Inf → -1*(-Inf-x)=+Inf>0 → real before null ✓
+      const MISSING = dir > 0 ? Infinity : -Infinity;
       const pick = (r, c) =>
-        c === 'price'  ? (r.d?.price  ?? INF) :
-        c === 'value'  ? (r.curVal    ?? INF) :
-        c === 'pl_pct' ? (r.pl_pct   ?? INF) :
-        c === 'pl_abs' ? (r.pl_abs   ?? INF) :
-        c === 'wt'     ? (r.wt       ?? INF) : (r.d?.[c] ?? INF);
+        c === 'price'  ? (r.d?.price  ?? MISSING) :
+        c === 'value'  ? (r.curVal    ?? MISSING) :
+        c === 'pl_pct' ? (r.pl_pct   ?? MISSING) :
+        c === 'pl_abs' ? (r.pl_abs   ?? MISSING) :
+        c === 'wt'     ? (r.wt       ?? MISSING) : (r.d?.[c] ?? MISSING);
       return dir * (pick(a, col) - pick(b, col));
     });
   }
