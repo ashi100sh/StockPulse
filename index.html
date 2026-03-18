@@ -375,8 +375,12 @@
     /* Column hiding when watchlist-only filter active */
     .perf-table.filter-wl th:nth-child(3),
     .perf-table.filter-wl td:nth-child(3),
-    .perf-table.filter-wl th:nth-child(11),
-    .perf-table.filter-wl td:nth-child(11) { display:none; }
+    .perf-table.filter-wl th:nth-child(14),
+    .perf-table.filter-wl td:nth-child(14),
+    .perf-table.filter-wl th:nth-child(15),
+    .perf-table.filter-wl td:nth-child(15),
+    .perf-table.filter-wl th:nth-child(16),
+    .perf-table.filter-wl td:nth-child(16) { display:none; }
     /* Section separator */
     .perf-sep-row td { background:var(--bg2); padding:5px 16px; border-top:2px solid var(--border);
                        border-bottom:none; }
@@ -461,6 +465,19 @@
     .detail-name  { color:var(--muted); font-size:14px; margin-top:3px; }
     .detail-price { font-size:34px; font-weight:800; margin-top:14px; letter-spacing:-1px; }
     .detail-pl    { font-size:15px; margin-top:5px; font-weight:600; }
+    /* ── 52-Week range bar (in detail sheet) ── */
+    .w52-wrap        { padding:4px 16px 12px; }
+    .w52-header      { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase;
+                       letter-spacing:.06em; margin-bottom:10px; }
+    .w52-bar-track   { position:relative; height:5px; background:var(--border); border-radius:5px; margin:0 6px; }
+    .w52-bar-fill    { position:absolute; left:0; top:0; height:100%; border-radius:5px;
+                       background:linear-gradient(90deg,var(--red) 0%,var(--green) 100%); }
+    .w52-bar-thumb   { position:absolute; top:50%; width:12px; height:12px; border-radius:50%;
+                       background:var(--accent); border:2px solid var(--bg2);
+                       transform:translate(-50%,-50%); box-shadow:0 0 0 2px var(--accent-glow); }
+    .w52-labels      { display:flex; justify-content:space-between; align-items:center;
+                       margin-top:8px; font-size:11px; font-weight:700; }
+
     .perf-grid  { display:grid; grid-template-columns:repeat(2,1fr);
                   gap:1px; background:var(--border); margin:12px 0; }
     .perf-cell  { background:var(--bg3); padding:14px 16px; }
@@ -713,6 +730,9 @@
               <th onclick="sortTable('pct_3m')">3M%</th>
               <th onclick="sortTable('pct_6m')">6M%</th>
               <th onclick="sortTable('pct_1y')">1Y%</th>
+              <th onclick="sortTable('pct_9m')">9M%</th>
+              <th onclick="sortTable('w52_low')">52W Lo</th>
+              <th onclick="sortTable('w52_high')">52W Hi</th>
               <th onclick="sortTable('div_yield')">Div%</th>
               <th onclick="sortTable('pl_pct')">P&amp;L%</th>
               <th onclick="sortTable('wt')">Wt%</th>
@@ -880,7 +900,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.38';
+const APP_BUILD  = '20260318.39';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1242,7 +1262,7 @@ async function proxyFetch(rawUrl) {
 //  State
 // ─────────────────────────────────────────────────────────────────────────────
 let portfolio   = loadPortfolio();
-let liveData    = {};          // yf_symbol -> { price, pct_1w, pct_1m, pct_3m, pct_1y }
+let liveData    = {};          // yf_symbol -> { price, pct_1d, pct_1w, pct_1m, pct_3m, pct_6m, pct_9m, pct_1y, w52_high, w52_low, div_yield }
 const failedSyms = new Set(); // symbols where this session's full refresh exhausted all retries with NO data
 let selectedSym = null;
 let searchTimer = null;
@@ -1713,7 +1733,10 @@ async function _fetchQuoteOnly(yf_symbol) {
     pct_1m:    null,
     pct_3m:    null,
     pct_6m:    null,
+    pct_9m:    null,
     pct_1y:    null,
+    w52_high:  null,
+    w52_low:   null,
     div_yield: rawDiv != null ? parseFloat((rawDiv * 100).toFixed(2)) : null,
     currency:  q.currency === 'INR' ? '₹' : (q.currency || '₹'),
     _quoteOnly: true,   // flag so card can show "price only" indicator
@@ -1753,7 +1776,10 @@ async function fetchLive(yf_symbol) {
       pct_1m:    pctAt(30),
       pct_3m:    pctAt(90),
       pct_6m:    pctAt(182),
+      pct_9m:    pctAt(270),
       pct_1y:    pctAt(365),
+      w52_high:  meta.fiftyTwoWeekHigh != null ? parseFloat(meta.fiftyTwoWeekHigh.toFixed(2))  : parseFloat(Math.max(...valid).toFixed(2)),
+      w52_low:   meta.fiftyTwoWeekLow  != null ? parseFloat(meta.fiftyTwoWeekLow.toFixed(2))   : parseFloat(Math.min(...valid).toFixed(2)),
       div_yield: null,   // filled later by batch dividend fetch in refreshAll
       currency:  meta.currency || '₹',
     };
@@ -1914,14 +1940,24 @@ async function refreshAll(mode = 'all', evt = null) {
       try {
         const divUrl = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
           encodeURIComponent(symsForDiv.join(',')) +
-          '&fields=trailingAnnualDividendYield&corsDomain=finance.yahoo.com';
+          '&fields=trailingAnnualDividendYield,dividendYield,trailingAnnualDividendRate,regularMarketPrice&corsDomain=finance.yahoo.com';
         const divRes  = await proxyFetch(divUrl);
         const divData = await divRes.json();
         let anyUpdated = false;
         (divData?.quoteResponse?.result || []).forEach(q => {
-          if (liveData[q.symbol] && q.trailingAnnualDividendYield != null) {
-            liveData[q.symbol].div_yield = parseFloat((q.trailingAnnualDividendYield * 100).toFixed(2));
+          if (!liveData[q.symbol]) return;
+          // prefer trailingAnnualDividendYield, fall back to dividendYield
+          const rawYield = q.trailingAnnualDividendYield ?? q.dividendYield;
+          if (rawYield != null && rawYield > 0) {
+            liveData[q.symbol].div_yield = parseFloat((rawYield * 100).toFixed(2));
             anyUpdated = true;
+          } else if (q.trailingAnnualDividendRate != null && q.trailingAnnualDividendRate > 0 && q.regularMarketPrice > 0) {
+            // fallback: compute yield from annual dividend ÷ price
+            const computed = q.trailingAnnualDividendRate / q.regularMarketPrice * 100;
+            liveData[q.symbol].div_yield = parseFloat(computed.toFixed(2));
+            anyUpdated = true;
+          } else {
+            liveData[q.symbol].div_yield = 0;   // mark as checked: no dividend
           }
         });
         // Re-render cards and analytics so div pills and Div% column appear
@@ -2399,6 +2435,9 @@ function renderAnalytics() {
       <td>${pctCell(d?.pct_3m, 15)}</td>
       <td>${pctCell(d?.pct_6m, 20)}</td>
       <td>${pctCell(d?.pct_1y, 30)}</td>
+      <td>${pctCell(d?.pct_9m, 25)}</td>
+      <td class="price-cell">${d?.w52_low  != null ? '₹' + d.w52_low.toLocaleString('en-IN')  : '<span class="pct-na">—</span>'}</td>
+      <td class="price-cell">${d?.w52_high != null ? '₹' + d.w52_high.toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
       <td>${pctCell(d?.div_yield, 5)}</td>
       <td>${pctCell(pl_pct, 30)}</td>
       <td class="val-cell">${wtCell}</td>
@@ -2420,7 +2459,7 @@ function renderAnalytics() {
     const msg = analyticsFilter === 'watchlist'
       ? 'No watchlist items yet — tap + and choose Watchlist'
       : 'No portfolio holdings yet — tap + to add';
-    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:48px 20px">${msg}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" style="text-align:center;color:var(--muted);padding:48px 20px">${msg}</td></tr>`;
     updateSortHeaders();
     if (sumEl) sumEl.innerHTML = '';
     const allocElEarly = document.getElementById('allocBar');
@@ -2521,7 +2560,7 @@ function sortWatchlist(col) {
 }
 
 function updateSortHeaders() {
-  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','div_yield','pl_pct','wt','pl_abs'];
+  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','pct_9m','w52_low','w52_high','div_yield','pl_pct','wt','pl_abs'];
   document.querySelectorAll('#perfTable th').forEach((th, i) => {
     th.classList.remove('sort-asc', 'sort-desc');
     if (cols[i] === sortCol) th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
@@ -2595,9 +2634,29 @@ function openDetail(id) {
     <div class="perf-grid">
       ${perfRow('1 Day','pct_1d')}${perfRow('1 Week','pct_1w')}
       ${perfRow('1 Month','pct_1m')}${perfRow('3 Months','pct_3m')}
-      ${perfRow('6 Months','pct_6m')}${perfRow('1 Year','pct_1y')}
-      ${divRow}
+      ${perfRow('6 Months','pct_6m')}${perfRow('9 Months','pct_9m')}
+      ${perfRow('1 Year','pct_1y')}${divRow}
     </div>
+    ${(() => {
+      const lo = d?.w52_low, hi = d?.w52_high, cur = d?.price;
+      if (lo == null || hi == null) return '';
+      const range = hi - lo;
+      const pos   = range > 0 ? Math.max(0, Math.min(100, ((cur - lo) / range * 100))) : 50;
+      const loFmt = '₹' + lo.toLocaleString('en-IN');
+      const hiFmt = '₹' + hi.toLocaleString('en-IN');
+      return `<div class="w52-wrap">
+        <div class="w52-header">52-Week Range</div>
+        <div class="w52-bar-track">
+          <div class="w52-bar-fill" style="width:${pos.toFixed(1)}%"></div>
+          <div class="w52-bar-thumb" style="left:${pos.toFixed(1)}%"></div>
+        </div>
+        <div class="w52-labels">
+          <span class="neg">${loFmt}</span>
+          <span style="color:var(--muted);font-size:10px">${pos.toFixed(0)}% of range</span>
+          <span class="pos">${hiFmt}</span>
+        </div>
+      </div>`;
+    })()}
     ${metaHtml}
     <div class="detail-actions">
       ${!isWatch ? `<button class="btn-edit" onclick="openEditSheet(${id})">${editIcon} Edit Holding</button>` : ''}
@@ -2660,7 +2719,7 @@ function deleteAll() {
 // ─────────────────────────────────────────────────────────────────────────────
 function exportCSV() {
   const headers = ['Type','Symbol','YF Symbol','Name','Exchange','Buy Price','Quantity','Buy Date',
-                   'Current Price','Current Value','P&L','P&L %','1D %','1W %','1M %','3M %','6M %','1Y %','Div %'];
+                   'Current Price','Current Value','P&L','P&L %','1D %','1W %','1M %','3M %','6M %','9M %','1Y %','52W Low','52W High','Div %'];
   const rows = portfolio.map(h => {
     const d   = liveData[h.yf_symbol];
     const inv = h.watch ? '' : h.buy_price * h.qty;
@@ -2673,8 +2732,8 @@ function exportCSV() {
       h.watch ? '' : h.buy_price, h.watch ? '' : h.qty, h.buy_date ?? '',
       d?.price ?? '', cur !== '' ? cur.toFixed(2) : '',
       pl !== '' ? pl.toFixed(2) : '', plp,
-      d?.pct_1d ?? '', d?.pct_1w ?? '', d?.pct_1m ?? '', d?.pct_3m ?? '', d?.pct_6m ?? '', d?.pct_1y ?? '',
-      d?.div_yield ?? '',
+      d?.pct_1d ?? '', d?.pct_1w ?? '', d?.pct_1m ?? '', d?.pct_3m ?? '', d?.pct_6m ?? '', d?.pct_9m ?? '', d?.pct_1y ?? '',
+      d?.w52_low ?? '', d?.w52_high ?? '', d?.div_yield ?? '',
     ];
   });
   const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\n');
