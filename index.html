@@ -348,7 +348,7 @@
        overflow-x:auto on a parent breaks position:sticky for children (CSS spec);
        giving perf-table-wrap overflow:auto makes it the scroll container and fixes
        the sticky thead so column headers remain visible and clickable while scrolling. */
-    #page-heatmap { display:flex !important; flex-direction:column; height:100%; }
+    #page-heatmap.active { display:flex; flex-direction:column; height:100%; }
     #allocBar { flex-shrink:0; }
 
     /* ── Analytics table ── */
@@ -908,7 +908,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.48';
+const APP_BUILD  = '20260318.49';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
