@@ -850,7 +850,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.36';
+const APP_BUILD  = '20260318.37';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -3063,9 +3063,14 @@ if ('serviceWorker' in navigator) {
         }
       });
     });
-    // Periodically poll for updates (every 30 min)
-    setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
   }).catch(() => {});
+
+  // Check for SW update when user brings app back to foreground (most natural moment)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      navigator.serviceWorker.getRegistration().then(r => r && r.update().catch(() => {}));
+    }
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
