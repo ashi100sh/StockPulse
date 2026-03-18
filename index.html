@@ -900,7 +900,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.45';
+const APP_BUILD  = '20260318.46';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1962,18 +1962,21 @@ async function refreshAll(mode = 'all', evt = null) {
     const okCount   = toFetch.length - stillFailed.length;
 
     // ── Best-effort: batch-fetch dividend yields via v7/quote ──
-    // One request for all symbols; totally optional — silently skip if fails.
-    const symsForDiv = toFetch.filter(s => liveData[s] && liveData[s].div_yield == null);
-    if (symsForDiv.length > 0) {
+    // Chunked into 20 symbols per request to stay within proxy URL limits.
+    const DIV_CHUNK   = 20;
+    const symsForDiv  = toFetch.filter(s => liveData[s] && liveData[s].div_yield == null);
+    const DIV_FIELDS  = 'trailingAnnualDividendYield,dividendYield,trailingAnnualDividendRate,' +
+                        'forwardAnnualDividendYield,forwardAnnualDividendRate,regularMarketPrice';
+    let anyUpdated = false;
+    for (let ci = 0; ci < symsForDiv.length; ci += DIV_CHUNK) {
+      if (refreshAbort) break;
+      const chunk = symsForDiv.slice(ci, ci + DIV_CHUNK);
       try {
-        const divUrl = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
-          encodeURIComponent(symsForDiv.join(',')) +
-          '&fields=trailingAnnualDividendYield,dividendYield,trailingAnnualDividendRate,' +
-          'forwardAnnualDividendYield,forwardAnnualDividendRate,regularMarketPrice' +
-          '&corsDomain=finance.yahoo.com';
+        const divUrl  = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
+          encodeURIComponent(chunk.join(',')) +
+          '&fields=' + DIV_FIELDS + '&corsDomain=finance.yahoo.com';
         const divRes  = await proxyFetch(divUrl);
         const divData = await divRes.json();
-        let anyUpdated = false;
         (divData?.quoteResponse?.result || []).forEach(q => {
           if (!liveData[q.symbol]) return;
           const rawYield = q.trailingAnnualDividendYield ?? q.dividendYield ?? q.forwardAnnualDividendYield;
@@ -1991,12 +1994,12 @@ async function refreshAll(mode = 'all', evt = null) {
             }
           }
         });
-        // Re-render cards and analytics so div pills and Div% column appear
-        if (anyUpdated) {
-          renderPortfolio();
-          renderAnalytics();
-        }
-      } catch { /* dividend yield is optional — ignore failures */ }
+      } catch { /* dividend yield is optional — skip failed chunk */ }
+    }
+    // Re-render cards and analytics so div pills and Div% column appear
+    if (anyUpdated) {
+      renderPortfolio();
+      renderAnalytics();
     }
 
     saveLiveCache();
