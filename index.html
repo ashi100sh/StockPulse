@@ -331,8 +331,8 @@
     .perf-table th.sort-desc::after { content:' ↓'; }
     .perf-table td { padding:11px 10px; font-size:13px; text-align:right;
                      border-bottom:1px solid var(--border); vertical-align:middle; }
-    .perf-table td:first-child { text-align:left; padding-left:16px;
-      position:sticky; left:0; z-index:2; background:inherit; }
+    .perf-table td:first-child { text-align:left; padding-left:16px; min-width:112px;
+      position:sticky; left:0; z-index:2; background:var(--bg); }
     .perf-table td:last-child  { padding-right:16px; }
     /* Ensure sticky cell background updates with row hover */
     .perf-table tr:active td:first-child { background:var(--bg3); }
@@ -802,7 +802,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.34';
+const APP_BUILD  = '20260318.35';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -2345,6 +2345,8 @@ function renderAnalytics() {
     tbody.innerHTML = `<tr><td colspan="13" style="text-align:center;color:var(--muted);padding:48px 20px">${msg}</td></tr>`;
     updateSortHeaders();
     if (sumEl) sumEl.innerHTML = '';
+    const allocElEarly = document.getElementById('allocBar');
+    if (allocElEarly && analyticsFilter === 'watchlist') allocElEarly.innerHTML = '';
     return;
   }
 
