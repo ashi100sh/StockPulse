@@ -1,9 +1,15 @@
-const CACHE = 'ptf-v4';
+const CACHE = 'ptf-v5';
 const STATIC = ['./manifest.json']; // index.html intentionally excluded — always fetch fresh
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(STATIC)));
-  self.skipWaiting();
+  // Do NOT skipWaiting automatically — let the page decide via postMessage
+  // so the update banner can be shown first
+});
+
+// Page sends { type: 'SKIP_WAITING' } when user taps "Reload now"
+self.addEventListener('message', e => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('activate', e => {

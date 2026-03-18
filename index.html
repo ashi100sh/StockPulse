@@ -35,6 +35,39 @@
       --card-shadow:0 1px 4px rgba(80,100,180,0.07);
     }
 
+    /* ── Splash screen ── */
+    #splash { position:fixed; inset:0; z-index:9999; background:var(--bg);
+              display:flex; flex-direction:column; align-items:center; justify-content:center;
+              transition:opacity 0.55s ease, visibility 0.55s ease; }
+    #splash.sp-hide { opacity:0; visibility:hidden; pointer-events:none; }
+    .spl-icon { width:84px; height:84px; background:var(--accent); border-radius:24px;
+                display:flex; align-items:center; justify-content:center; margin-bottom:24px;
+                box-shadow:0 12px 40px var(--accent-glow);
+                animation:spl-pulse 2s ease-in-out infinite; }
+    .spl-icon svg { width:48px; height:48px; color:#fff; }
+    @keyframes spl-pulse {
+      0%,100% { box-shadow:0 12px 40px var(--accent-glow); }
+      50%      { box-shadow:0 12px 56px rgba(99,102,241,0.55); }
+    }
+    .spl-name { font-size:32px; font-weight:800; letter-spacing:-0.6px; margin-bottom:6px; }
+    .spl-tag  { font-size:13px; color:var(--muted); font-weight:500; letter-spacing:0.04em; margin-bottom:48px; }
+    .spl-dots { display:flex; gap:7px; }
+    .spl-dot  { width:7px; height:7px; border-radius:50%; background:var(--accent); opacity:0.25;
+                animation:spl-dot 1.2s ease-in-out infinite; }
+    .spl-dot:nth-child(2) { animation-delay:0.2s; }
+    .spl-dot:nth-child(3) { animation-delay:0.4s; }
+    @keyframes spl-dot { 0%,80%,100%{opacity:0.2} 40%{opacity:0.85} }
+
+    /* ── SW update banner ── */
+    .update-bar { background:var(--accent); color:#fff; padding:9px 16px; font-size:13px;
+                  font-weight:600; display:none; align-items:center; justify-content:space-between;
+                  gap:12px; flex-shrink:0; }
+    .update-bar.visible { display:flex; }
+    .update-bar-btn { background:rgba(255,255,255,0.18); border:1.5px solid rgba(255,255,255,0.45);
+                      color:#fff; font-size:12px; font-weight:700; padding:5px 14px;
+                      border-radius:7px; cursor:pointer; white-space:nowrap; font-family:inherit; }
+    .update-bar-btn:active { background:rgba(255,255,255,0.35); }
+
     /* ── Reset / Base ── */
     * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
     html,body { height:100%; font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
@@ -54,9 +87,6 @@
     .brand-icon { width:26px; height:26px; background:var(--accent); border-radius:7px;
                   display:flex; align-items:center; justify-content:center; flex-shrink:0; }
     .brand-icon svg { width:15px; height:15px; color:#fff; }
-    .build-badge { font-size:10px; font-weight:600; color:var(--muted);
-                   background:var(--bg3); border:1px solid var(--border);
-                   border-radius:5px; padding:2px 6px; letter-spacing:0; font-family:'Inter',sans-serif; }
     .content { flex:1; overflow-y:auto; padding:0 0 72px; }
     .bottomnav { position:fixed; bottom:0; left:0; right:0; background:var(--bg2);
                  border-top:1px solid var(--border); display:flex; z-index:100;
@@ -496,7 +526,26 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mini.min.js" async></script>
 </head>
 <body>
+
+<!-- ── Splash screen (shown on PWA cold open, fades after 1.8 s) ── -->
+<div id="splash">
+  <div class="spl-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+  </div>
+  <div class="spl-name">StockPulse</div>
+  <div class="spl-tag">Portfolio · Performance · Pulse</div>
+  <div class="spl-dots"><div class="spl-dot"></div><div class="spl-dot"></div><div class="spl-dot"></div></div>
+</div>
+
 <div class="shell">
+
+<!-- ── App update banner (shown when a new SW version is waiting) ── -->
+<div id="updateBar" class="update-bar">
+  <span>⚡ New version available</span>
+  <button class="update-bar-btn" onclick="applyUpdate()">Reload now</button>
+</div>
 
   <!-- ── Topbar ── -->
   <div class="topbar">
@@ -507,7 +556,6 @@
         </svg>
       </div>
       StockPulse
-      <span class="build-badge" id="buildBadge">—</span>
     </div>
     <span class="last-update" id="lastUpdate"></span>
     <button class="icon-btn theme-btn" onclick="cycleTheme()" id="themeBtn" title="Toggle theme">☀️</button>
@@ -802,7 +850,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.35';
+const APP_BUILD  = '20260318.36';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -2973,19 +3021,89 @@ function triggerInstall() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Service Worker
+//  Service Worker + Update Detection
 // ─────────────────────────────────────────────────────────────────────────────
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+let _swWaiting = null;
+
+function showUpdateBanner(worker) {
+  _swWaiting = worker;
+  const bar = document.getElementById('updateBar');
+  if (bar) bar.classList.add('visible');
 }
+
+function applyUpdate() {
+  const bar = document.getElementById('updateBar');
+  if (bar) bar.classList.remove('visible');
+  if (_swWaiting) {
+    _swWaiting.postMessage({ type: 'SKIP_WAITING' });
+  } else if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+  } else {
+    location.reload();
+  }
+}
+
+if ('serviceWorker' in navigator) {
+  let swRefreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!swRefreshing) { swRefreshing = true; location.reload(); }
+  });
+
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    // Already waiting (e.g. user kept tab open in background, new SW installed)
+    if (reg.waiting && navigator.serviceWorker.controller) {
+      showUpdateBanner(reg.waiting);
+    }
+    // New SW installing during this session
+    reg.addEventListener('updatefound', () => {
+      const nw = reg.installing;
+      nw.addEventListener('statechange', () => {
+        if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+          showUpdateBanner(nw);
+        }
+      });
+    });
+    // Periodically poll for updates (every 30 min)
+    setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+  }).catch(() => {});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Splash screen
+// ─────────────────────────────────────────────────────────────────────────────
+(function initSplash() {
+  const splash = document.getElementById('splash');
+  if (!splash) return;
+  const isPWA = (window.navigator.standalone === true) ||
+                window.matchMedia('(display-mode: standalone)').matches ||
+                window.matchMedia('(display-mode: fullscreen)').matches;
+  const delay = isPWA ? 1800 : 0; // browser: instant, PWA: 1.8 s
+  const hide  = () => { splash.classList.add('sp-hide'); setTimeout(() => splash.remove(), 600); };
+  if (delay === 0) {
+    hide();
+  } else {
+    setTimeout(hide, delay);
+  }
+})();
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Boot
 // ─────────────────────────────────────────────────────────────────────────────
 applyTheme();
-document.getElementById('buildBadge').textContent    = 'b' + APP_BUILD;
-document.getElementById('versionFooter').textContent  = 'StockPulse · Build ' + APP_BUILD;
-document.getElementById('versionFooter2').textContent = 'StockPulse · Build ' + APP_BUILD;
+document.getElementById('versionFooter').textContent  = 'StockPulse · v' + APP_BUILD;
+document.getElementById('versionFooter2').textContent = 'StockPulse · v' + APP_BUILD;
+
+// ── Version change: show "What's New" toast when the build number advances ──
+(function checkVersion() {
+  const lastBuild = localStorage.getItem('sp_last_build');
+  if (lastBuild && lastBuild !== APP_BUILD) {
+    // Delay so it appears after splash fades
+    const isPWA = (window.navigator.standalone === true) ||
+                  window.matchMedia('(display-mode: standalone)').matches;
+    setTimeout(() => showToast('StockPulse updated ✨  v' + APP_BUILD), isPWA ? 2200 : 600);
+  }
+  localStorage.setItem('sp_last_build', APP_BUILD);
+})();
 
 // ── Smart startup: restore cached prices instantly, then only refresh if > 24 h old ──
 (function boot() {
