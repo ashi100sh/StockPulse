@@ -202,6 +202,11 @@ test('Only commas → comma', ',', detectDelimiter('A,B,C'));
 test('Only tabs → tab',     '\t', detectDelimiter('A\tB\tC'));
 test('Equal counts → comma', ',', detectDelimiter('A\tB,C'));
 
+/** Returns the matching entry if sym already in same bucket, else null. */
+function checkDuplicate(portfolio, yfSymbol, isWatch) {
+  return portfolio.find(h => h.yf_symbol === yfSymbol && !!h.watch === isWatch) || null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  New functions under test
 // ─────────────────────────────────────────────────────────────────────────────
@@ -303,6 +308,27 @@ function makeProxyFetch(fetchImpl, lsStore, proxyDefs) {
 
   return { proxyFetch, ls };
 }
+
+// ── checkDuplicate ────────────────────────────────────────────────────────────
+console.log('\ncheckDuplicate');
+const mixedPortfolio = [
+  { id: 1, yf_symbol: 'RELIANCE.NS', buy_price: 2800, qty: 2 },           // portfolio
+  { id: 2, yf_symbol: 'HDFCBANK.NS', buy_price: 1600, qty: 5 },           // portfolio
+  { id: 3, yf_symbol: 'TCS.NS',      watch: true },                        // watchlist
+  { id: 4, yf_symbol: 'AAPL',        watch: true },                        // watchlist
+];
+test('portfolio dupe found',                   1,    checkDuplicate(mixedPortfolio, 'RELIANCE.NS', false)?.id);
+test('second portfolio dupe found',            2,    checkDuplicate(mixedPortfolio, 'HDFCBANK.NS', false)?.id);
+test('watchlist dupe found',                   3,    checkDuplicate(mixedPortfolio, 'TCS.NS',      true)?.id);
+test('no dupe — new portfolio sym → null',     null, checkDuplicate(mixedPortfolio, 'INFY.NS',     false));
+test('no dupe — new watchlist sym → null',     null, checkDuplicate(mixedPortfolio, 'MSFT',        true));
+test('portfolio sym not a watchlist dupe',     null, checkDuplicate(mixedPortfolio, 'RELIANCE.NS', true));
+test('watchlist sym not a portfolio dupe',     null, checkDuplicate(mixedPortfolio, 'TCS.NS',      false));
+test('empty portfolio → null',                 null, checkDuplicate([], 'AAPL', false));
+test('watch:false same as no watch flag',      1,    checkDuplicate(
+  [{ id:1, yf_symbol:'X.NS', watch:false }], 'X.NS', false)?.id);
+test('watch:undefined treated as portfolio',   1,    checkDuplicate(
+  [{ id:1, yf_symbol:'X.NS' }], 'X.NS', false)?.id);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Async test sections
