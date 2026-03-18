@@ -348,7 +348,7 @@
        overflow-x:auto on a parent breaks position:sticky for children (CSS spec);
        giving perf-table-wrap overflow:auto makes it the scroll container and fixes
        the sticky thead so column headers remain visible and clickable while scrolling. */
-    #page-heatmap { display:flex !important; flex-direction:column; height:100%; }
+    #page-heatmap.active { display:flex; flex-direction:column; height:100%; }
     #allocBar { flex-shrink:0; }
 
     /* ── Analytics table ── */
@@ -366,9 +366,9 @@
     .perf-table th:last-child  { padding-right:16px; }
     .perf-table th:hover { color:var(--text); }
     .perf-table th.sort-asc  { color:var(--accent); }
-    .perf-table th.sort-asc::after  { content:' ↑'; }
+    .perf-table th.sort-asc::after  { content:' ↓'; }
     .perf-table th.sort-desc { color:var(--accent); }
-    .perf-table th.sort-desc::after { content:' ↓'; }
+    .perf-table th.sort-desc::after { content:' ↑'; }
     .perf-table td { padding:11px 10px; font-size:13px; text-align:right;
                      border-bottom:1px solid var(--border); vertical-align:middle; }
     .perf-table td:first-child { text-align:left; padding-left:16px; min-width:112px;
@@ -417,8 +417,8 @@
       padding:4px 11px; border-radius:20px; cursor:pointer; white-space:nowrap; flex-shrink:0;
       transition:background 0.15s,color 0.15s; }
     .hs-btn.active { background:var(--accent-dim); color:var(--accent); }
-    .hs-btn.asc::after  { content:' ↑'; }
-    .hs-btn.desc::after { content:' ↓'; }
+    .hs-btn.asc::after  { content:' ↓'; }
+    .hs-btn.desc::after { content:' ↑'; }
 
     /* ── Redesigned holding card ── */
     .hc-val { font-weight:800; font-size:15px; letter-spacing:-0.3px; }
@@ -737,8 +737,8 @@
               <th onclick="sortTable('pct_1m')">1M%</th>
               <th onclick="sortTable('pct_3m')">3M%</th>
               <th onclick="sortTable('pct_6m')">6M%</th>
-              <th onclick="sortTable('pct_1y')">1Y%</th>
               <th onclick="sortTable('pct_9m')">9M%</th>
+              <th onclick="sortTable('pct_1y')">1Y%</th>
               <th onclick="sortTable('w52_low')">52W Lo</th>
               <th onclick="sortTable('w52_high')">52W Hi</th>
               <th onclick="sortTable('div_yield')">Div%</th>
@@ -908,7 +908,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.48';
+const APP_BUILD  = '20260318.51';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1280,6 +1280,7 @@ let sortCol = 'value', sortDir = -1;       // analytics portfolio sort state
 let wlSortCol = 'symbol', wlSortDir = -1; // analytics watchlist sort state
 let holdingsSortCol = 'value', holdingsSortDir = -1; // holdings page sort state
 let isRefreshing = false;              // true while sequential refresh is running
+let retryProgress = null;             // { i, total, sym } — set while pending-mode retry runs
 let refreshAbort = false;              // set to true to stop in-progress refresh
 const fetchingSyms = new Set();        // yf_symbols currently being fetched
 
@@ -1883,7 +1884,8 @@ async function refreshAll(mode = 'all', evt = null) {
   // For pending-only retries: clear proxy cache so we race all proxies fresh
   // rather than re-hitting the recently-throttled winner from the previous run.
   if (mode === 'pending') localStorage.removeItem(PROXY_CACHE_KEY);
-  updateRetryBtn(); // hide Retry button while refresh is running
+  if (mode === 'pending') retryProgress = { i: 0, total: toFetch.length, sym: toFetch[0] || '' };
+  updateRetryBtn(); // show retry progress (pending) or hide button (other modes)
   const btn = document.getElementById('refreshBtn');
   btn.onclick = null; // progress indicator only — cancel is handled by cancelBtn
   const cancelBtn = document.getElementById('cancelBtn');
@@ -1898,6 +1900,10 @@ async function refreshAll(mode = 'all', evt = null) {
       btn.innerHTML = SPIN_ICO + ` ${label}${i + 1}/${symbols.length}${suffix}`;
 
       const sym = symbols[i];
+      if (mode === 'pending' && retryProgress) {
+        retryProgress = { i: i + 1, total: symbols.length, sym };
+        updateRetryBtn();
+      }
       fetchingSyms.add(sym);
       portfolio.filter(h => h.yf_symbol === sym).forEach(h => {
         const el = document.getElementById(`hcperf-${h.id}`);
@@ -2018,6 +2024,7 @@ async function refreshAll(mode = 'all', evt = null) {
 
   isRefreshing = false;
   refreshAbort = false;
+  retryProgress = null;
   btn.onclick = e => { if (!e._fromLongPress) refreshAll('all', e); };
   btn.innerHTML = REFRESH_ICO;
   const cancelBtnEnd = document.getElementById('cancelBtn');
@@ -2031,15 +2038,26 @@ async function refreshAll(mode = 'all', evt = null) {
 
 /** Show/hide the "Retry pending" button based on how many fetchable symbols still lack data. */
 function updateRetryBtn() {
-  const pending = [...new Set(portfolio.map(h => h.yf_symbol))]
-    .filter(s => !isSgb(s) && !liveData[s]).length;
+  const pendingSyms = [...new Set(portfolio.map(h => h.yf_symbol))]
+    .filter(s => !isSgb(s) && !liveData[s]);
+  const pending = pendingSyms.length;
   const btn = document.getElementById('retryBtn');
   if (!btn) return;
+  const SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1014.85-3.36L14 8"/></svg>`;
+  // While a pending retry is running — show live symbol progress
+  if (isRefreshing && retryProgress) {
+    const { i, total, sym } = retryProgress;
+    btn.style.display = '';
+    btn.title = `Retrying ${sym}…`;
+    btn.innerHTML = `${SVG} ${i}/${total} ${displaySym(sym)}…`;
+    return;
+  }
   const show = !isRefreshing && pending > 0;
   btn.style.display = show ? '' : 'none';
   if (show) {
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1014.85-3.36L14 8"/></svg> Retry ${pending}`;
-    btn.title = `${pending} holding${pending !== 1 ? 's' : ''} missing live data — click to retry`;
+    const names = pendingSyms.map(displaySym).join(', ');
+    btn.innerHTML = `${SVG} Retry ${pending}`;
+    btn.title = `Missing: ${names} — click to retry`;
   }
 }
 
@@ -2123,7 +2141,7 @@ async function refreshOne(yfSym, evt) {
 // ─────────────────────────────────────────────────────────────────────────────
 /** Build perf pills HTML for a live-data object. */
 function buildPillsHtml(d, isStale) {
-  const PERF = [['1D','pct_1d'],['1W','pct_1w'],['1M','pct_1m'],['3M','pct_3m'],['6M','pct_6m'],['1Y','pct_1y']];
+  const PERF = [['1D','pct_1d'],['1W','pct_1w'],['1M','pct_1m']];
   let pills = PERF.map(([lbl, key]) => {
     const v = d[key];
     if (v == null) return `<span class="perf-pill na${isStale ? ' stale' : ''}">${lbl} —</span>`;
@@ -2230,7 +2248,11 @@ function buildCard(h) {
 }
 
 function setHoldingsSort(col) {
-  holdingsSortDir = holdingsSortCol === col ? -holdingsSortDir : -1;
+  if (holdingsSortCol === col) {
+    holdingsSortDir = -holdingsSortDir;
+  } else {
+    holdingsSortDir = col === 'name' ? 1 : -1; // name: A→Z first; numeric: high first
+  }
   holdingsSortCol = col;
   renderPortfolio();
 }
@@ -2517,8 +2539,8 @@ function renderAnalytics() {
       <td>${pctCell(d?.pct_1m, 10)}</td>
       <td>${pctCell(d?.pct_3m, 15)}</td>
       <td>${pctCell(d?.pct_6m, 20)}</td>
-      <td>${pctCell(d?.pct_1y, 30)}</td>
       <td>${pctCell(d?.pct_9m, 25)}</td>
+      <td>${pctCell(d?.pct_1y, 30)}</td>
       <td class="price-cell">${d?.w52_low  != null ? '₹' + d.w52_low.toLocaleString('en-IN')  : '<span class="pct-na">—</span>'}</td>
       <td class="price-cell">${d?.w52_high != null ? '₹' + d.w52_high.toLocaleString('en-IN') : '<span class="pct-na">—</span>'}</td>
       <td>${pctCell(d?.div_yield, 5)}</td>
@@ -2632,7 +2654,11 @@ function toggleAlloc() {
 }
 
 function sortTable(col) {
-  sortDir = sortCol === col ? -sortDir : -1;
+  if (sortCol === col) {
+    sortDir = -sortDir;
+  } else {
+    sortDir = col === 'symbol' ? 1 : -1; // symbol: A→Z first; numeric: high first
+  }
   sortCol = col;
   renderAnalytics();
 }
@@ -2643,7 +2669,7 @@ function sortWatchlist(col) {
 }
 
 function updateSortHeaders() {
-  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_1y','pct_9m','w52_low','w52_high','div_yield','pl_pct','wt','pl_abs'];
+  const cols = ['symbol','price','value','pct_1d','pct_1w','pct_1m','pct_3m','pct_6m','pct_9m','pct_1y','w52_low','w52_high','div_yield','pl_pct','wt','pl_abs'];
   document.querySelectorAll('#perfTable th').forEach((th, i) => {
     th.classList.remove('sort-asc', 'sort-desc');
     if (cols[i] === sortCol) th.classList.add(sortDir === 1 ? 'sort-asc' : 'sort-desc');
@@ -2978,10 +3004,11 @@ function processImportText(rawText, inputEl) {
   //   -BL,-BE,-SM,-IL,-BZ,-MT,-SZ  trading restriction markers (e.g. URBANCO-BL)
   //   -RR  REIT units on NSE (e.g. EMBASSY-RR → EMBASSY, traded as EMBASSY.BO on BSE)
   //   -IV  InvIT units on NSE (e.g. PGINVIT-IV → PGINVIT)
+  //   -E   ETF units on NSE  (e.g. GOLDBEES-E → GOLDBEES → GOLDBEES.NS on Yahoo)
   // Strip them so we get the clean ticker for Yahoo Finance lookup.
   // Note: REITs/InvITs are BSE-listed; after stripping the exchange fallback
   // (.NS → .BO) will automatically resolve EMBASSY.NS → EMBASSY.BO.
-  const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|RR|IV)$/i;
+  const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|RR|IV|E)$/i;
 
   for (let i = hdrIdx + 1; i < lines.length; i++) {
     const row = parseCSVRow(lines[i], delim);
