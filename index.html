@@ -44,10 +44,13 @@
     /* ── Layout ── */
     .shell { display:flex; flex-direction:column; height:100vh; height:100dvh; }
     .topbar { background:var(--bg2); border-bottom:1px solid var(--border);
-              padding:11px 14px; display:flex; align-items:center; gap:8px;
-              flex-shrink:0; box-shadow:var(--card-shadow); }
-    .topbar-brand { font-size:16px; font-weight:800; flex:1; letter-spacing:-0.3px;
-                    display:flex; align-items:center; gap:7px; }
+              padding:8px 10px; display:flex; align-items:center; gap:6px;
+              flex-shrink:0; box-shadow:var(--card-shadow);
+              overflow-x:auto; scrollbar-width:none; flex-wrap:nowrap; }
+    .topbar::-webkit-scrollbar { display:none; }
+    .topbar-brand { font-size:16px; font-weight:800; flex:1; min-width:0;
+                    letter-spacing:-0.3px; display:flex; align-items:center; gap:7px;
+                    white-space:nowrap; overflow:hidden; }
     .brand-icon { width:26px; height:26px; background:var(--accent); border-radius:7px;
                   display:flex; align-items:center; justify-content:center; flex-shrink:0; }
     .brand-icon svg { width:15px; height:15px; color:#fff; }
@@ -250,9 +253,10 @@
 
     /* ── Topbar controls ── */
     .icon-btn { background:var(--bg3); border:1px solid var(--border); color:var(--text);
-                border-radius:9px; padding:7px 10px; cursor:pointer; font-size:13px;
+                border-radius:9px; padding:6px 9px; cursor:pointer; font-size:12px;
                 font-weight:600; font-family:inherit; display:flex; align-items:center;
-                gap:5px; transition:border-color 0.15s,color 0.15s; white-space:nowrap; }
+                gap:4px; transition:border-color 0.15s,color 0.15s; white-space:nowrap;
+                flex-shrink:0; }
     .icon-btn:active { border-color:var(--accent); color:var(--accent); }
     .icon-btn svg { width:13px; height:13px; }
     .icon-btn-install { border-color:var(--accent) !important; color:var(--accent) !important; }
@@ -458,6 +462,32 @@
     /* ── Version footer ── */
     .version-footer { text-align:center; padding:12px 16px 6px;
                       font-size:11px; color:var(--muted); font-weight:500; }
+
+    /* ── Source badge (imported from file) ── */
+    .source-badge { font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px;
+                    background:var(--bg3); color:var(--muted); border:1px solid var(--border); }
+    .source-badge.file { background:rgba(99,102,241,0.10); color:var(--accent); border-color:transparent; }
+
+    /* ── Alloc toggle ── */
+    .alloc-toggle-row { display:flex; align-items:center; justify-content:space-between;
+                        padding:8px 16px 4px; }
+    .alloc-toggle-label { font-size:10px; font-weight:700; color:var(--muted);
+                          text-transform:uppercase; letter-spacing:0.07em; }
+    .alloc-toggle-btn { font-size:11px; font-weight:600; color:var(--accent); background:none;
+                        border:none; cursor:pointer; padding:2px 6px; border-radius:5px; }
+    .alloc-toggle-btn:active { background:var(--accent-dim); }
+
+    /* ── Delete-all danger btn ── */
+    .action-btn.danger { color:var(--red); border-color:var(--red-dim); }
+    .action-btn.danger:active { border-color:var(--red); background:var(--red-dim); }
+
+    /* ── Edit btn in detail ── */
+    .btn-edit { width:100%; padding:14px; border-radius:13px; border:1.5px solid var(--border);
+                background:var(--bg3); color:var(--text); font-size:15px; font-weight:700;
+                font-family:inherit; cursor:pointer; display:flex; align-items:center;
+                justify-content:center; gap:8px; margin-bottom:10px; transition:background 0.15s; }
+    .btn-edit:active { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+    .btn-edit svg { width:16px; height:16px; }
   </style>
   <!-- SheetJS: parse .xls / .xlsx files (loaded async; falls back gracefully if offline) -->
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mini.min.js" async></script>
@@ -542,7 +572,15 @@
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
             <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          Import CSV / Excel
+          Import
+        </button>
+        <button class="action-btn danger" onclick="confirmDeleteAll()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+            <path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/>
+          </svg>
+          Clear All
         </button>
         <input type="file" id="csvInput" accept=".csv,.tsv,.xls,.xlsx" style="display:none" onchange="importCSV(this)" />
       </div>
@@ -640,7 +678,7 @@
   <div class="sheet">
     <div class="sheet-handle"></div>
     <div class="sheet-header">
-      <div class="sheet-title">Add Holding</div>
+      <div class="sheet-title" id="addSheetTitle">Add Holding</div>
       <button class="sheet-close" onclick="closeAddSheet()">✕</button>
     </div>
     <div class="sheet-body">
@@ -706,6 +744,33 @@
   </div>
 </div>
 
+<!-- ── Import Mode Dialog ── -->
+<div class="dialog-overlay" id="importDialog">
+  <div class="dialog">
+    <div class="dialog-icon">📂</div>
+    <div class="dialog-title">Import Holdings</div>
+    <div class="dialog-msg">Do you want to append to existing holdings or replace them?</div>
+    <div class="dialog-actions" style="flex-direction:column;gap:8px">
+      <button class="dialog-cancel" style="background:var(--accent);color:#fff;border-color:var(--accent)" onclick="doImport('append')">Append to existing</button>
+      <button class="dialog-cancel" style="background:var(--red-dim);color:var(--red);border-color:var(--red-dim)" onclick="doImport('replace')">Delete all &amp; replace</button>
+      <button class="dialog-cancel" onclick="cancelImport()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Delete All Dialog ── -->
+<div class="dialog-overlay" id="deleteAllDialog">
+  <div class="dialog">
+    <div class="dialog-icon">⚠️</div>
+    <div class="dialog-title">Clear all holdings?</div>
+    <div class="dialog-msg">This will permanently remove all portfolio holdings and watchlist items.</div>
+    <div class="dialog-actions">
+      <button class="dialog-cancel" onclick="closeDeleteAllDialog()">Cancel</button>
+      <button class="dialog-ok" onclick="deleteAll()">Clear All</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Toast ── -->
 <div class="toast" id="toast"></div>
 
@@ -713,7 +778,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.32';
+const APP_BUILD  = '20260318.33';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1071,6 +1136,8 @@ let liveData    = {};          // yf_symbol -> { price, pct_1w, pct_1m, pct_3m, 
 const failedSyms = new Set(); // symbols where this session's full refresh exhausted all retries with NO data
 let selectedSym = null;
 let searchTimer = null;
+let editingId   = null;        // null = add mode; number = edit mode holding id
+let allocExpanded = localStorage.getItem('sp_alloc_open') !== '0'; // default shown
 let sortCol = 'value', sortDir = -1;       // analytics portfolio sort state
 let wlSortCol = 'symbol', wlSortDir = -1; // analytics watchlist sort state
 let holdingsSortCol = 'value', holdingsSortDir = -1; // holdings page sort state
@@ -1367,14 +1434,38 @@ function setAddMode(mode) {
   document.getElementById('addBtn').textContent = mode === 'watchlist' ? 'Add to Watchlist' : 'Add to Portfolio';
 }
 function openAddSheet() {
+  editingId = null;
+  document.getElementById('addSheetTitle').textContent = 'Add Holding';
+  document.getElementById('addBtn').textContent = addMode === 'watchlist' ? 'Add to Watchlist' : 'Add to Portfolio';
   document.getElementById('addSheet').classList.add('open');
   setTimeout(() => document.getElementById('symSearch').focus(), 200);
 }
+function openEditSheet(id) {
+  const h = portfolio.find(x => x.id === id);
+  if (!h) return;
+  closeDetail();
+  editingId = id;
+  // Reset sheet to portfolio mode
+  if (h.watch) setAddMode('watchlist'); else setAddMode('portfolio');
+  document.getElementById('addSheetTitle').textContent = 'Edit Holding';
+  document.getElementById('addBtn').textContent = 'Save Changes';
+  // Pre-select symbol
+  selectSym(h.yf_symbol, h.name || h.symbol, h.exchange);
+  // Pre-fill fields
+  if (!h.watch) {
+    document.getElementById('fBuyPrice').value = h.buy_price || '';
+    document.getElementById('fQty').value      = h.qty || '';
+    document.getElementById('fDate').value     = h.buy_date || '';
+  }
+  document.getElementById('addSheet').classList.add('open');
+}
 function closeAddSheet() {
   document.getElementById('addSheet').classList.remove('open');
+  editingId = null;
   clearSym();
   ['fBuyPrice', 'fQty', 'fDate'].forEach(id => document.getElementById(id).value = '');
   if (addMode !== 'portfolio') setAddMode('portfolio');
+  document.getElementById('addSheetTitle').textContent = 'Add Holding';
 }
 
 function addHolding() {
@@ -1389,12 +1480,62 @@ function addHolding() {
 
   const sym        = selectedSym.yf_symbol;
   const symDisplay = selectedSym.symbol; // capture before closeAddSheet() nulls selectedSym
+
+  // ── Edit mode: update existing entry ─────────────────────────────────────
+  if (editingId != null) {
+    const idx = portfolio.findIndex(x => x.id === editingId);
+    if (idx !== -1) {
+      const existing = portfolio[idx];
+      const oldSym   = existing.yf_symbol;
+      portfolio[idx] = {
+        ...existing,
+        symbol:    selectedSym.symbol,
+        yf_symbol: sym,
+        name:      selectedSym.name,
+        exchange:  selectedSym.exchange,
+        source:    'manual',   // mark as manually edited
+      };
+      if (isWatch) {
+        portfolio[idx].watch = true;
+        delete portfolio[idx].buy_price;
+        delete portfolio[idx].qty;
+        delete portfolio[idx].buy_date;
+      } else {
+        delete portfolio[idx].watch;
+        portfolio[idx].buy_price = bp;
+        portfolio[idx].qty       = qty;
+        portfolio[idx].buy_date  = document.getElementById('fDate').value || '';
+      }
+      // If symbol changed, migrate live data
+      if (oldSym !== sym && liveData[oldSym]) {
+        liveData[sym] = liveData[oldSym];
+        delete liveData[oldSym];
+      }
+    }
+    savePortfolio();
+    closeAddSheet();
+    showToast('Updated ' + symDisplay);
+    renderPortfolio();
+    updateSummary();
+    if (document.getElementById('page-heatmap').classList.contains('active')) renderAnalytics();
+    return;
+  }
+
+  // ── Add mode: check for duplicates ───────────────────────────────────────
+  const isDuplicate = portfolio.some(h => h.yf_symbol === sym);
+  if (isDuplicate) {
+    showToast(symDisplay + ' already in portfolio — edit to change');
+    closeAddSheet();
+    return;
+  }
+
   const entry = {
     id:        Date.now(),
     symbol:    selectedSym.symbol,
     yf_symbol: sym,
     name:      selectedSym.name,
     exchange:  selectedSym.exchange,
+    source:    'manual',
   };
   if (isWatch) {
     entry.watch = true;
@@ -1584,16 +1725,41 @@ async function refreshAll(mode = 'all', evt = null) {
         if (el) el.innerHTML = '<span class="perf-pill na">⟳ Fetching…</span>';
       });
 
-      const d = await fetchLive(sym);
+      let d = await fetchLive(sym);
+      let usedSym = sym;
+
+      // ── Exchange auto-fallback: if .NS fails try .BO and vice versa ────────
+      if (!d) {
+        let altSym = null;
+        if (sym.endsWith('.NS'))      altSym = sym.replace('.NS', '.BO');
+        else if (sym.endsWith('.BO')) altSym = sym.replace('.BO', '.NS');
+        if (altSym) {
+          d = await fetchLive(altSym);
+          if (d) {
+            usedSym = altSym;
+            // Update portfolio entries to use the correct exchange
+            portfolio.forEach(h => {
+              if (h.yf_symbol === sym) {
+                h.yf_symbol = altSym;
+                h.exchange  = altSym.endsWith('.NS') ? 'NSI' : 'BOM';
+              }
+            });
+            savePortfolio();
+          }
+        }
+      }
+
       fetchingSyms.delete(sym);
       if (d) {
         delete d._cacheTs;        // mark as freshly fetched this session
         d._fetchedAt = Date.now(); // for smart-refresh staleness check
-        liveData[sym] = d;
+        liveData[usedSym] = d;
+        if (usedSym !== sym) delete liveData[sym];
         failedSyms.delete(sym);
+        failedSyms.delete(usedSym);
       }
 
-      portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
+      portfolio.filter(h => h.yf_symbol === sym || h.yf_symbol === usedSym).forEach(h => updateCard(h.id));
       updateSummary();
     }
   };
@@ -2171,7 +2337,16 @@ function renderAnalytics() {
       const legs = allocItems.map(x =>
         `<span class="alloc-leg"><span class="alloc-dot" style="background:${x.color}"></span>${x.sym} <strong>${(x.val/allocTotal*100).toFixed(1)}%</strong></span>`
       ).join('');
-      allocEl.innerHTML = `<div class="alloc-wrap"><div class="alloc-title">Portfolio Allocation</div><div class="alloc-bar">${segs}</div><div class="alloc-legend">${legs}</div></div>`;
+      const bodyHtml = allocExpanded
+        ? `<div class="alloc-bar">${segs}</div><div class="alloc-legend">${legs}</div>`
+        : '';
+      allocEl.innerHTML = `<div class="alloc-wrap">
+        <div class="alloc-toggle-row">
+          <span class="alloc-toggle-label">Portfolio Allocation</span>
+          <button class="alloc-toggle-btn" onclick="toggleAlloc()">${allocExpanded ? '▲ Hide' : '▼ Show'}</button>
+        </div>
+        ${bodyHtml}
+      </div>`;
     } else {
       allocEl.innerHTML = '';
     }
@@ -2210,6 +2385,12 @@ function renderAnalytics() {
       sumEl.innerHTML = chips.join('');
     }
   }
+}
+
+function toggleAlloc() {
+  allocExpanded = !allocExpanded;
+  localStorage.setItem('sp_alloc_open', allocExpanded ? '1' : '0');
+  renderAnalytics();
 }
 
 function sortTable(col) {
@@ -2251,6 +2432,9 @@ function openDetail(id) {
     </div>`;
   }
 
+  const editIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
   const delIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
     <polyline points="3 6 5 6 21 6"/>
     <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
@@ -2286,7 +2470,8 @@ function openDetail(id) {
       <button class="sheet-close" onclick="closeDetail()">✕</button>
     </div>
     <div class="detail-header">
-      <div class="detail-sym">${h.symbol}${isWatch ? ' <span style="font-size:11px;color:var(--accent)">Watchlist</span>' : ''}</div>
+      <div class="detail-sym">${h.symbol}${isWatch ? ' <span style="font-size:11px;color:var(--accent)">Watchlist</span>' : ''}
+        ${h.source === 'file' ? ' <span class="source-badge file">📄 Imported</span>' : ''}</div>
       <div class="detail-name">${h.name || ''} · ${EXCH_DISPLAY[h.exchange] || h.exchange || ''}</div>
       <div class="detail-price">${d ? fmtC(d.price) : '—'}</div>
       ${plHtml}
@@ -2299,6 +2484,7 @@ function openDetail(id) {
     </div>
     ${metaHtml}
     <div class="detail-actions">
+      ${!isWatch ? `<button class="btn-edit" onclick="openEditSheet(${id})">${editIcon} Edit Holding</button>` : ''}
       <button class="btn-del" onclick="confirmDelete(${id},'${esc(h.symbol)}')">
         ${delIcon} ${isWatch ? 'Remove from Watchlist' : 'Remove Holding'}
       </button>
@@ -2331,6 +2517,26 @@ function deleteHolding(id) {
   renderPortfolio();
   renderAnalytics();
   showToast('Holding removed');
+}
+
+function confirmDeleteAll() {
+  if (portfolio.length === 0) { showToast('Portfolio is already empty'); return; }
+  document.getElementById('deleteAllDialog').classList.add('open');
+}
+function closeDeleteAllDialog() {
+  document.getElementById('deleteAllDialog').classList.remove('open');
+}
+function deleteAll() {
+  closeDeleteAllDialog();
+  const count = portfolio.length;
+  portfolio = [];
+  liveData  = {};
+  savePortfolio();
+  try { localStorage.removeItem(CACHE_KEY); } catch {}
+  renderPortfolio();
+  renderAnalytics();
+  updateCacheBanner();
+  showToast(`Cleared ${count} holding${count !== 1 ? 's' : ''}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2508,24 +2714,37 @@ function processImportText(rawText, inputEl) {
     showToast(`Could not find columns: ${missing}`); return;
   }
 
-  let added = 0, skipped = 0;
+  let added = 0, skipped = 0, dupes = 0;
+
+  // Zerodha appends trading-restriction suffixes (e.g. URBANCO-BL, RELIANCE-BE)
+  // Strip them so we get the clean ticker for Yahoo Finance lookup.
+  const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|IV)$/i;
+
   for (let i = hdrIdx + 1; i < lines.length; i++) {
     const row = parseCSVRow(lines[i], delim);
     const get = idx => (idx >= 0 ? (row[idx] || '').replace(/,/g, '') : '');
-    const sym = get(iSym).toUpperCase();
+    const rawSym = get(iSym).toUpperCase().trim();
+    // Strip Zerodha restriction suffixes
+    const sym = rawSym.replace(ZERODHA_SUFFIXES, '');
     const bp  = parseFloat(get(iBp));
     const qty = parseFloat(get(iQty));
     if (!sym || isNaN(bp) || bp <= 0 || isNaN(qty) || qty <= 0) { skipped++; continue; }
-    const exch = iExch >= 0 ? get(iExch).toUpperCase() || defaultExchange : defaultExchange;
+    const exch    = iExch >= 0 ? get(iExch).toUpperCase() || defaultExchange : defaultExchange;
+    const yfSym   = normalizeYfSymbol(sym, exch);
+
+    // Skip duplicates — same yf_symbol already in portfolio
+    if (portfolio.some(h => h.yf_symbol === yfSym)) { dupes++; continue; }
+
     portfolio.push({
       id:        Date.now() + i,
       symbol:    sym,
-      yf_symbol: normalizeYfSymbol(sym, exch),
+      yf_symbol: yfSym,
       name:      iName >= 0 ? get(iName) || sym : sym,
       exchange:  exch,
       buy_price: bp,
       qty,
       buy_date:  iDate >= 0 ? get(iDate) : '',
+      source:    'file',   // mark as imported from file
     });
     added++;
   }
@@ -2533,20 +2752,49 @@ function processImportText(rawText, inputEl) {
   if (inputEl) inputEl.value = '';
   savePortfolio();
 
+  const dupeMsg = dupes > 0 ? ` · ${dupes} duplicate${dupes !== 1 ? 's' : ''} skipped` : '';
+  const skipMsg = skipped > 0 ? ` · ${skipped} invalid row${skipped !== 1 ? 's' : ''}` : '';
+
   if (added > 0) {
-    showToast(`Imported ${added} holding${added !== 1 ? 's' : ''} · ${brokerLabel}${skipped ? ` (${skipped} skipped)` : ''}`);
+    showToast(`Imported ${added} holding${added !== 1 ? 's' : ''} · ${brokerLabel}${dupeMsg}${skipMsg}`);
     renderPortfolio();
     updateRetryBtn();
     refreshAll('pending');
   } else {
-    showToast(skipped ? `No valid rows — ${skipped} skipped` : 'Nothing to import');
+    showToast(dupes > 0 ? `All ${dupes} holding${dupes !== 1 ? 's' : ''} already in portfolio` :
+              skipped > 0 ? `No valid rows — ${skipped} skipped` : 'Nothing to import');
   }
 }
+
+let _pendingImportInput = null;
 
 function importCSV(input) {
   const file = input.files[0];
   if (!file) return;
+  _pendingImportInput = input;
+  // If portfolio is empty, skip the dialog and just append
+  if (portfolio.length === 0) { doImport('append'); return; }
+  document.getElementById('importDialog').classList.add('open');
+}
 
+function cancelImport() {
+  document.getElementById('importDialog').classList.remove('open');
+  if (_pendingImportInput) { _pendingImportInput.value = ''; _pendingImportInput = null; }
+}
+
+function doImport(mode) {
+  document.getElementById('importDialog').classList.remove('open');
+  const input = _pendingImportInput;
+  _pendingImportInput = null;
+  if (!input || !input.files[0]) return;
+
+  if (mode === 'replace') {
+    portfolio = [];
+    liveData  = {};
+    try { localStorage.removeItem(CACHE_KEY); } catch {}
+  }
+
+  const file    = input.files[0];
   const isExcel = /\.(xlsx?|ods)$/i.test(file.name);
   if (isExcel) {
     if (typeof XLSX === 'undefined') {
@@ -2599,6 +2847,12 @@ document.getElementById('detailSheet').addEventListener('click', e => {
 });
 document.getElementById('confirmDialog').addEventListener('click', e => {
   if (e.target === document.getElementById('confirmDialog')) closeConfirm();
+});
+document.getElementById('importDialog').addEventListener('click', e => {
+  if (e.target === document.getElementById('importDialog')) cancelImport();
+});
+document.getElementById('deleteAllDialog').addEventListener('click', e => {
+  if (e.target === document.getElementById('deleteAllDialog')) closeDeleteAllDialog();
 });
 // Close open swipe when tapping outside holding list
 document.getElementById('holdingsList').addEventListener('touchstart', e => {
