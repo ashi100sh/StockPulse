@@ -321,7 +321,8 @@
                      text-align:right; cursor:pointer; white-space:nowrap;
                      border-bottom:2px solid var(--border); user-select:none;
                      transition:color 0.15s; }
-    .perf-table th:first-child { text-align:left; padding-left:16px; }
+    .perf-table th:first-child { text-align:left; padding-left:16px;
+      position:sticky; left:0; z-index:6; background:var(--bg2); }
     .perf-table th:last-child  { padding-right:16px; }
     .perf-table th:hover { color:var(--text); }
     .perf-table th.sort-asc  { color:var(--accent); }
@@ -330,8 +331,11 @@
     .perf-table th.sort-desc::after { content:' ↓'; }
     .perf-table td { padding:11px 10px; font-size:13px; text-align:right;
                      border-bottom:1px solid var(--border); vertical-align:middle; }
-    .perf-table td:first-child { text-align:left; padding-left:16px; }
+    .perf-table td:first-child { text-align:left; padding-left:16px;
+      position:sticky; left:0; z-index:2; background:inherit; }
     .perf-table td:last-child  { padding-right:16px; }
+    /* Ensure sticky cell background updates with row hover */
+    .perf-table tr:active td:first-child { background:var(--bg3); }
     .perf-table tr { cursor:pointer; }
     .perf-table tr:active td { background:var(--bg3); }
     /* Watchlist rows — ultra-subtle left accent via inset shadow */
@@ -383,15 +387,22 @@
     .hc-cur-price { color:var(--text); font-weight:600; }
 
     /* ── Portfolio allocation bar (analytics) ── */
-    .alloc-wrap { padding:12px 16px 8px; border-bottom:1px solid var(--border); }
-    .alloc-title { font-size:10px; font-weight:700; color:var(--muted); text-transform:uppercase;
-      letter-spacing:0.07em; margin-bottom:8px; }
-    .alloc-bar { display:flex; height:10px; border-radius:5px; overflow:hidden; gap:2px; }
-    .alloc-seg { height:100%; cursor:default; transition:opacity 0.2s; min-width:4px; }
+    .alloc-wrap { border-bottom:1px solid var(--border); }
+    .alloc-head { display:flex; align-items:center; justify-content:space-between;
+      padding:10px 16px 10px; cursor:pointer; user-select:none; }
+    .alloc-head:active { background:var(--bg3); }
+    .alloc-head-label { font-size:11px; font-weight:700; color:var(--muted);
+      text-transform:uppercase; letter-spacing:0.07em; }
+    .alloc-head-chevron { font-size:11px; font-weight:700; color:var(--accent);
+      transition:transform 0.2s; display:inline-block; }
+    .alloc-head-chevron.open { transform:rotate(180deg); }
+    .alloc-body { padding:0 16px 12px; }
+    .alloc-bar { display:flex; height:12px; border-radius:6px; overflow:hidden; gap:2px; margin-bottom:10px; }
+    .alloc-seg { height:100%; cursor:default; transition:opacity 0.2s; min-width:4px; border-radius:3px; }
     .alloc-seg:hover { opacity:0.65; }
-    .alloc-legend { display:flex; flex-wrap:wrap; gap:5px 14px; margin-top:8px; }
-    .alloc-leg { display:flex; align-items:center; gap:5px; font-size:10px; color:var(--muted); }
-    .alloc-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .alloc-legend { display:flex; flex-wrap:wrap; gap:6px 16px; }
+    .alloc-leg { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); }
+    .alloc-dot { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
     /* Wt% cell with inline bar */
     .wt-wrap { display:inline-flex; align-items:center; gap:5px; }
     .wt-bar { display:inline-block; height:3px; border-radius:2px; opacity:0.5; min-width:2px; }
@@ -468,14 +479,6 @@
                     background:var(--bg3); color:var(--muted); border:1px solid var(--border); }
     .source-badge.file { background:rgba(99,102,241,0.10); color:var(--accent); border-color:transparent; }
 
-    /* ── Alloc toggle ── */
-    .alloc-toggle-row { display:flex; align-items:center; justify-content:space-between;
-                        padding:8px 16px 4px; }
-    .alloc-toggle-label { font-size:10px; font-weight:700; color:var(--muted);
-                          text-transform:uppercase; letter-spacing:0.07em; }
-    .alloc-toggle-btn { font-size:11px; font-weight:600; color:var(--accent); background:none;
-                        border:none; cursor:pointer; padding:2px 6px; border-radius:5px; }
-    .alloc-toggle-btn:active { background:var(--accent-dim); }
 
     /* ── Delete-all danger btn ── */
     .action-btn.danger { color:var(--red); border-color:var(--red-dim); }
@@ -526,7 +529,7 @@
       </svg>
       Cancel
     </button>
-    <button class="icon-btn" id="refreshBtn" onclick="refreshAll('all',event)" title="Refresh (Shift+click to force-refresh all)">
+    <button class="icon-btn" id="refreshBtn" title="Refresh · hold for options">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
         <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
@@ -771,6 +774,27 @@
   </div>
 </div>
 
+<!-- ── Refresh Options Sheet ── -->
+<div class="sheet-overlay" id="refreshSheet">
+  <div class="sheet" style="max-height:auto">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header">
+      <div class="sheet-title">Refresh Prices</div>
+      <button class="sheet-close" onclick="closeRefreshSheet()">✕</button>
+    </div>
+    <div class="sheet-body" style="padding-bottom:32px">
+      <button class="btn-full btn-primary" style="margin-bottom:10px" onclick="closeRefreshSheet();refreshAll('all')">
+        Smart Refresh
+        <div style="font-size:11px;font-weight:500;opacity:0.85;margin-top:3px">Skip symbols refreshed in last 15 min</div>
+      </button>
+      <button class="btn-full" style="background:var(--bg3);border:1.5px solid var(--border);color:var(--text)" onclick="closeRefreshSheet();refreshAll('force')">
+        Force Refresh All
+        <div style="font-size:11px;font-weight:500;opacity:0.7;margin-top:3px;color:var(--muted)">Re-fetch every symbol — takes longer</div>
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ── Toast ── -->
 <div class="toast" id="toast"></div>
 
@@ -778,7 +802,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.33';
+const APP_BUILD  = '20260318.34';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1674,6 +1698,8 @@ function stopRefresh() {
   if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.textContent = 'Stopping…'; }
 }
 
+function closeRefreshSheet() { document.getElementById('refreshSheet').classList.remove('open'); }
+
 async function refreshAll(mode = 'all', evt = null) {
   if (isRefreshing) { showToast('Refresh in progress…'); return; }
 
@@ -1686,8 +1712,8 @@ async function refreshAll(mode = 'all', evt = null) {
     if (sgbCount > 0) showToast(`${sgbCount} SGB holding${sgbCount > 1 ? 's' : ''} skipped — not supported by Yahoo Finance`);
   }
 
-  // Smart refresh: skip symbols already fresh (<15 min old), unless Shift+click
-  const forceAll = evt?.shiftKey === true;
+  // Smart refresh: skip symbols already fresh (<15 min old), unless force mode
+  const forceAll = mode === 'force' || evt?.shiftKey === true;
   let toFetch;
   if (mode === 'pending') {
     toFetch = fetchable.filter(s => !liveData[s]);
@@ -1698,12 +1724,17 @@ async function refreshAll(mode = 'all', evt = null) {
     const fresh  = fetchable.filter(s => isDataFresh(s));
     toFetch = fetchable.filter(s => !isDataFresh(s));
     if (fresh.length > 0 && toFetch.length === 0) {
-      showToast(`All ${fresh.length} symbols up to date · Shift+click to force refresh`);
+      showToast(`All ${fresh.length} symbols up to date · hold Refresh to force-refresh`);
       return;
     }
     if (fresh.length > 0) {
       showToast(`Skipping ${fresh.length} fresh · refreshing ${toFetch.length} stale`);
     }
+  }
+  // Show start notice so user knows it's working (especially on slow mobile connections)
+  if (toFetch.length > 0) {
+    const label = forceAll ? 'Force-refreshing' : 'Refreshing';
+    showToast(`${label} ${toFetch.length} symbol${toFetch.length !== 1 ? 's' : ''}… may take a moment`);
   }
   if (!toFetch.length) { updateRetryBtn(); return; }
 
@@ -1831,7 +1862,7 @@ async function refreshAll(mode = 'all', evt = null) {
 
   isRefreshing = false;
   refreshAbort = false;
-  btn.onclick = e => refreshAll('all', e);
+  btn.onclick = e => { if (!e._fromLongPress) refreshAll('all', e); };
   btn.innerHTML = REFRESH_ICO;
   const cancelBtnEnd = document.getElementById('cancelBtn');
   if (cancelBtnEnd) cancelBtnEnd.style.display = 'none';
@@ -2340,20 +2371,17 @@ function renderAnalytics() {
         return { sym: h.symbol.replace(/\.(NS|BO)$/i,''), val: v, color: COLORS[i % COLORS.length] };
       }).sort((a, b) => b.val - a.val);
       const segs = allocItems.map(x =>
-        `<div class="alloc-seg" style="width:${(x.val/allocTotal*100).toFixed(2)}%;background:${x.color}" title="${x.sym} ${(x.val/allocTotal*100).toFixed(1)}%"></div>`
+        `<div class="alloc-seg" style="width:${(x.val/allocTotal*100).toFixed(2)}%;background:${x.color}" title="${x.sym}: ${(x.val/allocTotal*100).toFixed(1)}%"></div>`
       ).join('');
       const legs = allocItems.map(x =>
-        `<span class="alloc-leg"><span class="alloc-dot" style="background:${x.color}"></span>${x.sym} <strong>${(x.val/allocTotal*100).toFixed(1)}%</strong></span>`
+        `<span class="alloc-leg"><span class="alloc-dot" style="background:${x.color}"></span>${x.sym}&nbsp;<strong>${(x.val/allocTotal*100).toFixed(1)}%</strong></span>`
       ).join('');
-      const bodyHtml = allocExpanded
-        ? `<div class="alloc-bar">${segs}</div><div class="alloc-legend">${legs}</div>`
-        : '';
       allocEl.innerHTML = `<div class="alloc-wrap">
-        <div class="alloc-toggle-row">
-          <span class="alloc-toggle-label">Portfolio Allocation</span>
-          <button class="alloc-toggle-btn" onclick="toggleAlloc()">${allocExpanded ? '▲ Hide' : '▼ Show'}</button>
+        <div class="alloc-head" onclick="toggleAlloc()">
+          <span class="alloc-head-label">Portfolio Allocation</span>
+          <span class="alloc-head-chevron ${allocExpanded ? 'open' : ''}">▼</span>
         </div>
-        ${bodyHtml}
+        ${allocExpanded ? `<div class="alloc-body"><div class="alloc-bar">${segs}</div><div class="alloc-legend">${legs}</div></div>` : ''}
       </div>`;
     } else {
       allocEl.innerHTML = '';
@@ -2867,6 +2895,48 @@ document.getElementById('importDialog').addEventListener('click', e => {
 document.getElementById('deleteAllDialog').addEventListener('click', e => {
   if (e.target === document.getElementById('deleteAllDialog')) closeDeleteAllDialog();
 });
+document.getElementById('refreshSheet').addEventListener('click', e => {
+  if (e.target === document.getElementById('refreshSheet')) closeRefreshSheet();
+});
+
+// ── Long-press on Refresh button → show options sheet ───────────────────────
+(function() {
+  const btn = document.getElementById('refreshBtn');
+  let lpTimer = null;
+  const LONG_MS = 500; // ms to trigger long-press
+
+  function cancelLp() { clearTimeout(lpTimer); lpTimer = null; }
+
+  // Normal click (no long-press)
+  btn.addEventListener('click', e => {
+    if (e._fromLongPress) return; // already handled
+    if (!isRefreshing) refreshAll('all', e);
+  });
+
+  // Touch long-press (mobile)
+  btn.addEventListener('touchstart', e => {
+    cancelLp();
+    lpTimer = setTimeout(() => {
+      lpTimer = null;
+      if (isRefreshing) return;
+      // Vibrate briefly if supported
+      if (navigator.vibrate) navigator.vibrate(40);
+      document.getElementById('refreshSheet').classList.add('open');
+      // Prevent the subsequent touchend from firing a click
+      e.preventDefault();
+    }, LONG_MS);
+  }, { passive: false });
+
+  btn.addEventListener('touchend', cancelLp, { passive: true });
+  btn.addEventListener('touchmove', cancelLp, { passive: true });
+  btn.addEventListener('touchcancel', cancelLp, { passive: true });
+
+  // Desktop: right-click OR Shift+click → force refresh (kept for power users)
+  btn.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    if (!isRefreshing) document.getElementById('refreshSheet').classList.add('open');
+  });
+})();
 // Close open swipe when tapping outside holding list
 document.getElementById('holdingsList').addEventListener('touchstart', e => {
   if (!e.target.closest('.swipe-wrap')) resetAllSwipes();
