@@ -900,7 +900,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.43';
+const APP_BUILD  = '20260318.44';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1708,8 +1708,13 @@ function addHolding() {
       if (d) break;
     }
     fetchingSyms.delete(sym);
-    if (d) { delete d._cacheTs; d._fetchedAt = Date.now(); liveData[sym] = d; failedSyms.delete(sym); }
-    else { failedSyms.add(sym); }
+    if (d) {
+      delete d._cacheTs; d._fetchedAt = Date.now();
+      if (d.div_yield == null) {
+        try { d.div_yield = await fetchDividendYield(sym); } catch { /* optional */ }
+      }
+      liveData[sym] = d; failedSyms.delete(sym);
+    } else { failedSyms.add(sym); }
     portfolio.filter(h => h.yf_symbol === sym).forEach(h => updateCard(h.id));
     updateSummary();
     saveLiveCache();
@@ -1728,12 +1733,22 @@ function addHolding() {
 async function _fetchQuoteOnly(yf_symbol) {
   const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
     encodeURIComponent(yf_symbol) +
-    '&fields=regularMarketPrice,currency,trailingAnnualDividendYield&corsDomain=finance.yahoo.com';
+    '&fields=regularMarketPrice,currency,trailingAnnualDividendYield,dividendYield,' +
+    'trailingAnnualDividendRate,forwardAnnualDividendYield,forwardAnnualDividendRate' +
+    '&corsDomain=finance.yahoo.com';
   const res  = await proxyFetch(url);
   const data = await res.json();
   const q    = data?.quoteResponse?.result?.[0];
   if (!q || q.regularMarketPrice == null) throw new Error('empty quote');
-  const rawDiv = q.trailingAnnualDividendYield;
+  const rawYield = q.trailingAnnualDividendYield ?? q.dividendYield ?? q.forwardAnnualDividendYield;
+  let divYield = null;
+  if (rawYield != null && rawYield > 0) {
+    divYield = parseFloat((rawYield * 100).toFixed(2));
+  } else {
+    const rate = q.trailingAnnualDividendRate ?? q.forwardAnnualDividendRate;
+    if (rate != null && rate > 0 && q.regularMarketPrice > 0)
+      divYield = parseFloat((rate / q.regularMarketPrice * 100).toFixed(2));
+  }
   return {
     price:     parseFloat(q.regularMarketPrice.toFixed(2)),
     pct_1d:    null,
@@ -1745,7 +1760,7 @@ async function _fetchQuoteOnly(yf_symbol) {
     pct_1y:    null,
     w52_high:  null,
     w52_low:   null,
-    div_yield: rawDiv != null ? parseFloat((rawDiv * 100).toFixed(2)) : null,
+    div_yield: divYield,
     currency:  q.currency === 'INR' ? '₹' : (q.currency || '₹'),
     _quoteOnly: true,   // flag so card can show "price only" indicator
   };
@@ -1948,24 +1963,27 @@ async function refreshAll(mode = 'all', evt = null) {
       try {
         const divUrl = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
           encodeURIComponent(symsForDiv.join(',')) +
-          '&fields=trailingAnnualDividendYield,dividendYield,trailingAnnualDividendRate,regularMarketPrice&corsDomain=finance.yahoo.com';
+          '&fields=trailingAnnualDividendYield,dividendYield,trailingAnnualDividendRate,' +
+          'forwardAnnualDividendYield,forwardAnnualDividendRate,regularMarketPrice' +
+          '&corsDomain=finance.yahoo.com';
         const divRes  = await proxyFetch(divUrl);
         const divData = await divRes.json();
         let anyUpdated = false;
         (divData?.quoteResponse?.result || []).forEach(q => {
           if (!liveData[q.symbol]) return;
-          // prefer trailingAnnualDividendYield, fall back to dividendYield
-          const rawYield = q.trailingAnnualDividendYield ?? q.dividendYield;
+          const rawYield = q.trailingAnnualDividendYield ?? q.dividendYield ?? q.forwardAnnualDividendYield;
           if (rawYield != null && rawYield > 0) {
             liveData[q.symbol].div_yield = parseFloat((rawYield * 100).toFixed(2));
             anyUpdated = true;
-          } else if (q.trailingAnnualDividendRate != null && q.trailingAnnualDividendRate > 0 && q.regularMarketPrice > 0) {
-            // fallback: compute yield from annual dividend ÷ price
-            const computed = q.trailingAnnualDividendRate / q.regularMarketPrice * 100;
-            liveData[q.symbol].div_yield = parseFloat(computed.toFixed(2));
-            anyUpdated = true;
           } else {
-            liveData[q.symbol].div_yield = 0;   // mark as checked: no dividend
+            const rate  = q.trailingAnnualDividendRate ?? q.forwardAnnualDividendRate;
+            const price = q.regularMarketPrice;
+            if (rate != null && rate > 0 && price > 0) {
+              liveData[q.symbol].div_yield = parseFloat((rate / price * 100).toFixed(2));
+              anyUpdated = true;
+            } else {
+              liveData[q.symbol].div_yield = 0;   // mark as checked: no dividend
+            }
           }
         });
         // Re-render cards and analytics so div pills and Div% column appear
@@ -2013,6 +2031,32 @@ function updateRetryBtn() {
  * Refresh a single yf_symbol without affecting the main refresh state.
  * Preserves old price/perf data on screen until new data arrives.
  */
+/**
+ * Fetch dividend yield for a single symbol.
+ * Tries: trailingAnnualDividendYield → dividendYield → forwardAnnualDividendYield
+ *        → rate/price fallback (trailing then forward).
+ * Returns a percentage number (e.g. 3.65) or 0 if no dividend, null on error.
+ */
+async function fetchDividendYield(yfSym) {
+  const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
+    encodeURIComponent(yfSym) +
+    '&fields=trailingAnnualDividendYield,dividendYield,trailingAnnualDividendRate,' +
+    'forwardAnnualDividendYield,forwardAnnualDividendRate,regularMarketPrice' +
+    '&corsDomain=finance.yahoo.com';
+  const res  = await proxyFetch(url);
+  const data = await res.json();
+  const q    = data?.quoteResponse?.result?.[0];
+  if (!q) return null;
+  const rawYield = q.trailingAnnualDividendYield ?? q.dividendYield ?? q.forwardAnnualDividendYield;
+  if (rawYield != null && rawYield > 0)
+    return parseFloat((rawYield * 100).toFixed(2));
+  const rate  = q.trailingAnnualDividendRate ?? q.forwardAnnualDividendRate;
+  const price = q.regularMarketPrice;
+  if (rate != null && rate > 0 && price > 0)
+    return parseFloat((rate / price * 100).toFixed(2));
+  return 0; // confirmed: no dividend
+}
+
 async function refreshOne(yfSym, evt) {
   if (evt) evt.stopPropagation(); // prevent card click
   if (fetchingSyms.has(yfSym) || isSgb(yfSym)) return;
@@ -2032,8 +2076,13 @@ async function refreshOne(yfSym, evt) {
 
   const d = await fetchLive(yfSym);
   fetchingSyms.delete(yfSym);
-  if (d) { delete d._cacheTs; d._fetchedAt = Date.now(); liveData[yfSym] = d; failedSyms.delete(yfSym); }
-  else    { failedSyms.add(yfSym); }
+  if (d) {
+    delete d._cacheTs; d._fetchedAt = Date.now();
+    if (d.div_yield == null) {
+      try { d.div_yield = await fetchDividendYield(yfSym); } catch { /* optional */ }
+    }
+    liveData[yfSym] = d; failedSyms.delete(yfSym);
+  } else { failedSyms.add(yfSym); }
 
   portfolio.filter(h => h.yf_symbol === yfSym).forEach(h => {
     updateCard(h.id);
@@ -2058,7 +2107,7 @@ function buildPillsHtml(d, isStale) {
     return `<span class="perf-pill ${v >= 0 ? 'pos' : 'neg'}${isStale ? ' stale' : ''}">${lbl} ${v >= 0 ? '+' : ''}${v}%</span>`;
   }).join('');
   if (d.div_yield != null && d.div_yield > 0)
-    pills += `<span class="perf-pill info" title="Trailing annual dividend yield">Div ${d.div_yield}%</span>`;
+    pills += `<span class="perf-pill info" title="Dividend yield">Div ${d.div_yield}%</span>`;
   if (d._quoteOnly)
     pills += '<span class="perf-pill warn" title="Chart API blocked — price only; %% on next refresh">~ price only</span>';
   return pills;
