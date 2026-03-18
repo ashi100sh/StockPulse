@@ -1,4 +1,4 @@
-const CACHE = 'ptf-v3';
+const CACHE = 'ptf-v4';
 const STATIC = ['./manifest.json']; // index.html intentionally excluded — always fetch fresh
 
 self.addEventListener('install', e => {
