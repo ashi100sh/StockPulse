@@ -56,6 +56,23 @@ function normalizeYfSymbol(raw, exchange) {
 
 function displaySym(s) { return (s || '').replace(/\.(NS|BO)$/i, ''); }
 
+// Zerodha suffix stripping — mirrors ZERODHA_SUFFIXES in processImportText()
+const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|RR|IV|E)$/i;
+function stripZerodhaSuffix(sym) { return sym.replace(ZERODHA_SUFFIXES, ''); }
+
+// Today's day high/low inner HTML — mirrors buildDayRangeInner() in index.html
+function buildDayRangeInner(d) {
+  if (!d || d.day_high == null || d.day_low == null) return '';
+  const atHi  = d.price >= d.day_high * 0.997;
+  const atLo  = d.price <= d.day_low  * 1.003;
+  const fmtV  = v => '₹' + v.toLocaleString('en-IN', {maximumFractionDigits:2});
+  const hiTag = atHi ? `<span class="dr-hi">H ${fmtV(d.day_high)}</span>`
+                     : `<span class="dr-lbl">H ${fmtV(d.day_high)}</span>`;
+  const loTag = atLo ? `<span class="dr-lo">L ${fmtV(d.day_low)}</span>`
+                     : `<span class="dr-lbl">L ${fmtV(d.day_low)}</span>`;
+  return `${loTag}<span class="dr-sep">·</span>${hiTag}`;
+}
+
 function pctChange(closes, timestamps, daysAgo) {
   if (!closes || !closes.length) return null;
   const valid = closes.filter(c => c != null);
@@ -126,6 +143,78 @@ test('No suffix unchanged','AAPL',      displaySym('AAPL'));
 test('Null → empty',       '',          displaySym(null));
 test('Empty → empty',      '',          displaySym(''));
 test('Case insensitive .ns','ICICI',    displaySym('ICICI.ns'));
+
+// ── stripZerodhaSuffix ───────────────────────────────────────────────────────
+console.log('\nstripZerodhaSuffix');
+test('ETF -E stripped (GOLDBEES-E → GOLDBEES)',   'GOLDBEES',  stripZerodhaSuffix('GOLDBEES-E'));
+test('ETF -E stripped (NIFTYBEES-E)',             'NIFTYBEES', stripZerodhaSuffix('NIFTYBEES-E'));
+test('ETF -E stripped (LIQUIDBEES-E)',            'LIQUIDBEES',stripZerodhaSuffix('LIQUIDBEES-E'));
+test('-BL stripped (blocked)',                    'URBANCO',   stripZerodhaSuffix('URBANCO-BL'));
+test('-BE stripped (book entry)',                 'SUZLON',    stripZerodhaSuffix('SUZLON-BE'));
+test('-SM stripped (SME)',                        'ABCD',      stripZerodhaSuffix('ABCD-SM'));
+test('-IL stripped (illiquid)',                   'XYZ',       stripZerodhaSuffix('XYZ-IL'));
+test('-RR stripped (REIT on NSE)',                'EMBASSY',   stripZerodhaSuffix('EMBASSY-RR'));
+test('-IV stripped (InvIT on NSE)',               'PGINVIT',   stripZerodhaSuffix('PGINVIT-IV'));
+test('-BZ stripped',                             'ABC',       stripZerodhaSuffix('ABC-BZ'));
+test('-MT stripped',                             'ABC',       stripZerodhaSuffix('ABC-MT'));
+test('-SZ stripped',                             'ABC',       stripZerodhaSuffix('ABC-SZ'));
+test('Case-insensitive: -bl stripped',           'URBANCO',   stripZerodhaSuffix('URBANCO-bl'));
+test('Clean symbol → unchanged',                 'RELIANCE',  stripZerodhaSuffix('RELIANCE'));
+test('Symbol with dot → unchanged',              'INFY.NS',   stripZerodhaSuffix('INFY.NS'));
+test('-E only stripped at end',                  'A-EB',      stripZerodhaSuffix('A-EB'));  // -EB is not a suffix
+test('GOLDBEES-E normalizes to GOLDBEES.NS',
+  'GOLDBEES.NS',
+  normalizeYfSymbol(stripZerodhaSuffix('GOLDBEES-E'), 'NSE'));
+
+// ── buildDayRangeInner ───────────────────────────────────────────────────────
+console.log('\nbuildDayRangeInner');
+// No data → empty string
+test('null data → empty',           '', buildDayRangeInner(null));
+test('missing day_high → empty',    '', buildDayRangeInner({ price:100, day_high:null, day_low:90 }));
+test('missing day_low → empty',     '', buildDayRangeInner({ price:100, day_high:110, day_low:null }));
+
+// Normal range: both lbl spans, no badge classes
+{
+  const html = buildDayRangeInner({ price:100, day_high:110, day_low:90 });
+  test('normal range: H is dr-lbl',   true, html.includes('class="dr-lbl">H'));
+  test('normal range: L is dr-lbl',   true, html.includes('class="dr-lbl">L'));
+  test('normal range: no dr-hi badge',false, html.includes('dr-hi'));
+  test('normal range: no dr-lo badge',false, html.includes('dr-lo'));
+}
+
+// At high (price == day_high → within 0.3%)
+{
+  const html = buildDayRangeInner({ price:110, day_high:110, day_low:90 });
+  test('at day-high: H gets dr-hi badge',  true,  html.includes('class="dr-hi">H'));
+  test('at day-high: L stays dr-lbl',      true,  html.includes('class="dr-lbl">L'));
+}
+
+// At low (price == day_low → within 0.3%)
+{
+  const html = buildDayRangeInner({ price:90, day_high:110, day_low:90 });
+  test('at day-low: L gets dr-lo badge',   true,  html.includes('class="dr-lo">L'));
+  test('at day-low: H stays dr-lbl',       true,  html.includes('class="dr-lbl">H'));
+}
+
+// Near high (within 0.3%)
+{
+  const html = buildDayRangeInner({ price:109.7, day_high:110, day_low:90 });
+  test('near high (0.27% below): dr-hi',   true,  html.includes('class="dr-hi">H'));
+}
+
+// Near low (within 0.3%)
+{
+  const html = buildDayRangeInner({ price:90.25, day_high:110, day_low:90 });
+  test('near low (0.28% above): dr-lo',    true,  html.includes('class="dr-lo">L'));
+}
+
+// Contains H and L value text
+{
+  const html = buildDayRangeInner({ price:100, day_high:1234.56, day_low:987.65 });
+  test('H value in output', true, html.includes('₹1,234.56'));
+  test('L value in output', true, html.includes('₹987.65'));
+  test('separator present', true, html.includes('dr-sep'));
+}
 
 // ── pctChange ────────────────────────────────────────────────────────────────
 console.log('\npctChange');
@@ -225,7 +314,7 @@ function checkDuplicate(portfolio, yfSymbol, isWatch) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function buildPillsHtml(d, isStale) {
-  const PERF = [['1D','pct_1d'],['1W','pct_1w'],['1M','pct_1m'],['3M','pct_3m'],['6M','pct_6m'],['1Y','pct_1y']];
+  const PERF = [['1D','pct_1d'],['1W','pct_1w'],['1M','pct_1m']];
   let pills = PERF.map(([lbl, key]) => {
     const v = d[key];
     if (v == null) return `<span class="perf-pill na${isStale ? ' stale' : ''}">${lbl} —</span>`;
@@ -405,50 +494,59 @@ test('1D from 200-day set', parseFloat(((199.5 - 199.0) / 199.0 * 100).toFixed(2
 
 // ── buildPillsHtml ────────────────────────────────────────────────────────────
 console.log('\nbuildPillsHtml');
-test('All null → all na pills (6 of them)',
-  6,
-  (buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,pct_3m:null,pct_6m:null,pct_1y:null }, false)
+test('All null → 3 na pills (1D 1W 1M only)',
+  3,
+  (buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null }, false)
     .match(/perf-pill na/g) || []).length);
+
+test('3M/6M/1Y keys ignored — only 3 pills rendered',
+  3,
+  (buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,pct_3m:5,pct_6m:5,pct_1y:5 }, false)
+    .match(/perf-pill/g) || []).length);
 
 test('Positive value → pos class',
   true,
-  buildPillsHtml({ pct_1d:1.5,pct_1w:null,pct_1m:null,pct_3m:null,pct_6m:null,pct_1y:null }, false)
+  buildPillsHtml({ pct_1d:1.5,pct_1w:null,pct_1m:null }, false)
     .includes('perf-pill pos'));
 
 test('Negative value → neg class',
   true,
-  buildPillsHtml({ pct_1d:-2.3,pct_1w:null,pct_1m:null,pct_3m:null,pct_6m:null,pct_1y:null }, false)
+  buildPillsHtml({ pct_1d:-2.3,pct_1w:null,pct_1m:null }, false)
     .includes('perf-pill neg'));
 
 test('Stale flag → stale added to na pill',
   true,
-  buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,pct_3m:null,pct_6m:null,pct_1y:null }, true)
+  buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null }, true)
     .includes('perf-pill na stale'));
 
 test('Stale flag → stale added to pos pill',
   true,
-  buildPillsHtml({ pct_1d:1.0,pct_1w:null,pct_1m:null,pct_3m:null,pct_6m:null,pct_1y:null }, true)
+  buildPillsHtml({ pct_1d:1.0,pct_1w:null,pct_1m:null }, true)
     .includes('perf-pill pos stale'));
 
 test('div_yield present → info pill shown',
   true,
-  buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,pct_3m:null,pct_6m:null,pct_1y:null,div_yield:2.5 }, false)
+  buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,div_yield:2.5 }, false)
     .includes('perf-pill info'));
 
 test('div_yield 0 → info pill NOT shown',
   false,
-  buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,pct_3m:null,pct_6m:null,pct_1y:null,div_yield:0 }, false)
+  buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,div_yield:0 }, false)
     .includes('perf-pill info'));
 
 test('_quoteOnly → warn pill shown',
   true,
-  buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,pct_3m:null,pct_6m:null,pct_1y:null,_quoteOnly:true }, false)
+  buildPillsHtml({ pct_1d:null,pct_1w:null,pct_1m:null,_quoteOnly:true }, false)
     .includes('perf-pill warn'));
 
-test('6 perf labels present: 1D 1W 1M 3M 6M 1Y',
+test('3 perf labels present: 1D 1W 1M',
   true,
-  ['1D','1W','1M','3M','6M','1Y'].every(lbl =>
-    buildPillsHtml({ pct_1d:1,pct_1w:1,pct_1m:1,pct_3m:1,pct_6m:1,pct_1y:1 }, false).includes(lbl)));
+  ['1D','1W','1M'].every(lbl =>
+    buildPillsHtml({ pct_1d:1,pct_1w:1,pct_1m:1 }, false).includes(lbl)));
+
+test('3M label NOT shown on card (analytics only)',
+  false,
+  buildPillsHtml({ pct_1d:1,pct_1w:1,pct_1m:1,pct_3m:1 }, false).includes('>3M '));
 
 // ── portfolioSummaryCalc ──────────────────────────────────────────────────────
 console.log('\nportfolioSummaryCalc');
