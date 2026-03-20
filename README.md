@@ -1,7 +1,7 @@
 # ⚡ StockPulse
 
 > **The portfolio tracker Zerodha Kite never gave you.**
-> Track NSE · BSE · US stocks with **1D / 1W / 1M / 3M / 6M / 1Y %** plus P&L, dividend yield, heatmap analytics — right from your browser. No login. No install. No server.
+> Track NSE · BSE · US stocks with **1D / 1W / 1M %** on every card and full **1D / 1W / 1M / 3M / 6M / 9M / 1Y %** in Analytics — plus P&L, dividend yield, heatmap analytics — right from your browser. No login. No install. No server.
 
 <p align="center">
   <img src="icon-512.png" width="96" alt="StockPulse icon" />
@@ -74,7 +74,8 @@
 
 ### Live Prices & Performance
 - **Live prices** from Yahoo Finance via multi-proxy CORS system
-- Performance pills on every card: **1D · 1W · 1M · 3M · 6M · 1Y %**
+- Performance pills on every card: **1D · 1W · 1M %** (full breakdown in Analytics)
+- **9M %** column available in Analytics alongside 1D · 1W · 1M · 3M · 6M · 1Y
 - **Dividend yield** badge (trailing annual %)
 - **Per-card refresh** button — refresh a single stock without disturbing others
 - **Refresh modes** (long-press on mobile):
@@ -85,13 +86,14 @@
 ### Import / Export
 - **Import** from XLS, XLSX, CSV, TSV — including Zerodha Kite CSV and Zerodha Holdings Statement XLS
 - **Import mode dialog** — choose *Append to existing* or *Delete all & replace*
-- **Zerodha suffix stripping** — automatically cleans `-BL` (blocked), `-BE` (book entry), `-RR` (REIT), `-IV` (InvIT) and other suffixes
+- **Zerodha suffix stripping** — automatically cleans `-BL` (blocked), `-BE` (book entry), `-E` (ETF), `-RR` (REIT), `-IV` (InvIT) and other suffixes
 - **Duplicate detection** during import — skips rows already in portfolio
 - **Source tracking** — imported holdings show a 📄 badge; editing changes them to *manual*
 - **Export to CSV** — full data including live prices, all % columns, P&L, dividend yield
 
 ### Analytics Page
-- Sortable performance table with columns: Price · Value · 1D% · 1W% · 1M% · 3M% · 6M% · 1Y% · Div% · P&L% · Wt% · P&L ₹
+- Sortable performance table with columns: Price · Value · 1D% · 1W% · 1M% · 3M% · 6M% · **9M%** · **1Y%** · 52W Lo/Hi · Div% · P&L% · Wt% · P&L ₹
+- **Sort convention** — ↑ means high values at top (descending); ↓ means low values at top; Stock/Name column defaults to A→Z on first click
 - **Heat-map cells** — background intensity scales with return magnitude
 - **Sticky first column** — stock name stays visible while scrolling right on mobile
 - **Portfolio / Watchlist filter tabs**
@@ -100,7 +102,7 @@
 
 ### UI / UX
 - Dark and Light themes (tap moon/sun icon)
-- Holdings sort bar: by Value · P&L% · Today · Name · Invested
+- Holdings sort bar: by Value · P&L% · Today · Name · Invested (↑ = high first; ↓ = low first)
 - Swipe-left to delete cards (mobile)
 - Cache age banner — shows how old prices are, with smart refresh prompt
 - Toast notifications for all actions
@@ -213,7 +215,7 @@ User taps Import → picks file
      → auto-detect delimiter (tab vs comma)
      → scan whole file for header row (handles Zerodha metadata rows)
      → detect broker profile (Zerodha Kite / Zerodha Holdings Statement / generic)
-     → strip Zerodha suffixes: -BL -BE -SM -IL -RR -IV etc.
+     → strip Zerodha suffixes: -BL -BE -E -SM -IL -RR -IV etc.
      → skip duplicates (same yf_symbol already in portfolio)
      → push entries with source:'file'
   → savePortfolio() → refreshAll('pending')
@@ -294,6 +296,7 @@ The importer auto-detects:
 |---|---|---|
 | `-BL` | Blocked / delisted | `URBANCO-BL` → `URBANCO` |
 | `-BE` | Book entry / trade-for-trade | `SUZLON-BE` → `SUZLON` |
+| `-E` | ETF units (NSE) | `GOLDBEES-E` → `GOLDBEES.NS` |
 | `-SM` | SME platform | `ABCD-SM` → `ABCD` |
 | `-IL` | Illiquid | `XYZ-IL` → `XYZ` |
 | `-RR` | REIT units (NSE) | `EMBASSY-RR` → `EMBASSY` |
@@ -327,6 +330,7 @@ Current Price, Current Value, P&L, P&L %, 1D %, 1W %, 1M %, 3M %, 6M %, 1Y %, Di
 | **Right-click Refresh** (desktop) | Same options sheet |
 | **Tap individual card ↻** | Refresh only that one stock |
 | **Tap cache banner** | Refresh all stale |
+| **Tap Retry N button** | Retry only the N symbols with missing data — shows live progress `1/N SYMBOL…` while fetching; tooltip lists the missing symbols before you click |
 
 **Force Refresh All** re-fetches every symbol regardless of cache age. A start-of-refresh toast shows how many symbols are being fetched.
 
@@ -565,6 +569,8 @@ In `index.html`, find `BROKER_PROFILES` and add:
 
 | Build | Highlights |
 |---|---|
+| **b20260318.51** | 9M% column now correctly ordered before 1Y% in analytics; sort arrows flipped to trading-app convention (↑ = high first, ↓ = low first); Name/Symbol sort defaults to A→Z on first click; portfolio card pills trimmed to 1D · 1W · 1M (full breakdown in Analytics) |
+| **b20260318.50** | ETF suffix `-E` stripping (`GOLDBEES-E` → `GOLDBEES.NS`); Retry button shows live per-symbol progress during retry (`1/1 GOLDBEES…`); missing-symbol tooltip on Retry button |
 | **b20260318.34** | Long-press refresh sheet (Smart / Force), sticky stock name in analytics, allocation accordion with chevron, start-of-refresh notice |
 | **b20260318.33** | Edit holding in-place, exchange auto-fallback (.NS↔.BO), import dialog (append/replace), Clear All button, duplicate detection, source tracking (📄 Imported badge), URBANCO-BL / EMBASSY-RR suffix stripping, REIT/InvIT name map, topbar mobile fix |
 | **b20260318.32** | PWA beforeinstallprompt handler for Chrome Android |
