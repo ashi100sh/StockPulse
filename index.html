@@ -429,14 +429,6 @@
       color:var(--muted); }
     .hc-avg-arr { opacity:0.4; font-size:10px; }
     .hc-cur-price { color:var(--text); font-weight:600; }
-    /* ── Day range (today's high / low) ── */
-    .hc-dayrange { display:flex; align-items:center; gap:5px; margin-top:3px; font-size:11px; }
-    .dr-lbl  { color:var(--muted); }
-    .dr-sep  { color:var(--border); }
-    .dr-hi   { background:rgba(34,197,94,0.18); color:#16a34a; padding:1px 6px; border-radius:10px; font-weight:600; }
-    .dr-lo   { background:rgba(239,68,68,0.15);  color:#dc2626; padding:1px 6px; border-radius:10px; font-weight:600; }
-    [data-theme="light"] .dr-hi { background:rgba(34,197,94,0.14); color:#15803d; }
-    [data-theme="light"] .dr-lo { background:rgba(239,68,68,0.13); color:#b91c1c; }
 
     /* ── Portfolio allocation bar (analytics) ── */
     .alloc-wrap { border-bottom:1px solid var(--border); }
@@ -916,7 +908,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  Build
 // ─────────────────────────────────────────────────────────────────────────────
-const APP_BUILD  = '20260318.52';
+const APP_BUILD  = '20260320.53';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000; // 24 h — only auto-refresh if older than this
 const CACHE_KEY       = 'sp_live_v1';   // localStorage key for live-price cache
 const SMART_STALE_MS  = 15 * 60 * 1000; // 15 min — data younger than this is skipped on smart refresh
@@ -1278,7 +1270,7 @@ async function proxyFetch(rawUrl) {
 //  State
 // ─────────────────────────────────────────────────────────────────────────────
 let portfolio   = loadPortfolio();
-let liveData    = {};          // yf_symbol -> { price, pct_1d, pct_1w, pct_1m, pct_3m, pct_6m, pct_9m, pct_1y, w52_high, w52_low, day_high, day_low, div_yield }
+let liveData    = {};          // yf_symbol -> { price, pct_1d, pct_1w, pct_1m, pct_3m, pct_6m, pct_9m, pct_1y, w52_high, w52_low, div_yield }
 const failedSyms = new Set(); // symbols where this session's full refresh exhausted all retries with NO data
 let selectedSym = null;
 let searchTimer = null;
@@ -1755,7 +1747,7 @@ function addHolding() {
 async function _fetchQuoteOnly(yf_symbol) {
   const url = 'https://query1.finance.yahoo.com/v7/finance/quote?symbols=' +
     encodeURIComponent(yf_symbol) +
-    '&fields=regularMarketPrice,regularMarketDayHigh,regularMarketDayLow,currency,' +
+    '&fields=regularMarketPrice,currency,' +
     'trailingAnnualDividendYield,dividendYield,' +
     'trailingAnnualDividendRate,forwardAnnualDividendYield,forwardAnnualDividendRate' +
     '&corsDomain=finance.yahoo.com';
@@ -1783,8 +1775,6 @@ async function _fetchQuoteOnly(yf_symbol) {
     pct_1y:    null,
     w52_high:  null,
     w52_low:   null,
-    day_high:  q.regularMarketDayHigh  != null ? parseFloat(q.regularMarketDayHigh.toFixed(2))  : null,
-    day_low:   q.regularMarketDayLow   != null ? parseFloat(q.regularMarketDayLow.toFixed(2))   : null,
     div_yield: divYield,
     currency:  q.currency === 'INR' ? '₹' : (q.currency || '₹'),
     _quoteOnly: true,   // flag so card can show "price only" indicator
@@ -1806,11 +1796,6 @@ async function fetchLive(yf_symbol) {
     if (!valid.length) throw new Error('no closes');
     const cur  = valid[valid.length - 1];
     const meta = result.meta || {};
-    // Today's high / low — last candle in the OHLC series
-    const lastH  = q0.high?.[q0.high.length - 1];
-    const lastL  = q0.low?.[q0.low.length - 1];
-    const day_high = lastH != null ? parseFloat(lastH.toFixed(2)) : null;
-    const day_low  = lastL != null ? parseFloat(lastL.toFixed(2)) : null;
 
     function pctAt(daysAgo) {
       const targetTs = ts[ts.length - 1] - daysAgo * 86400;
@@ -1834,8 +1819,6 @@ async function fetchLive(yf_symbol) {
       pct_1y:    pctAt(365),
       w52_high:  meta.fiftyTwoWeekHigh != null ? parseFloat(meta.fiftyTwoWeekHigh.toFixed(2))  : parseFloat(Math.max(...valid).toFixed(2)),
       w52_low:   meta.fiftyTwoWeekLow  != null ? parseFloat(meta.fiftyTwoWeekLow.toFixed(2))   : parseFloat(Math.min(...valid).toFixed(2)),
-      day_high,
-      day_low,
       div_yield: null,   // filled later by batch dividend fetch in refreshAll
       currency:  meta.currency || '₹',
     };
@@ -2173,19 +2156,6 @@ function buildPillsHtml(d, isStale) {
   return pills;
 }
 
-/** Inner HTML for the today's high/low row. Returns '' when data is unavailable. */
-function buildDayRangeInner(d) {
-  if (!d || d.day_high == null || d.day_low == null) return '';
-  const atHi  = d.price >= d.day_high * 0.997;  // within 0.3% = at/near high
-  const atLo  = d.price <= d.day_low  * 1.003;  // within 0.3% = at/near low
-  const fmtV  = v => '₹' + v.toLocaleString('en-IN', {maximumFractionDigits:2});
-  const hiTag = atHi ? `<span class="dr-hi">H ${fmtV(d.day_high)}</span>`
-                     : `<span class="dr-lbl">H ${fmtV(d.day_high)}</span>`;
-  const loTag = atLo ? `<span class="dr-lo">L ${fmtV(d.day_low)}</span>`
-                     : `<span class="dr-lbl">L ${fmtV(d.day_low)}</span>`;
-  return `${loTag}<span class="dr-sep">·</span>${hiTag}`;
-}
-
 /** Build the delete-reveal + swipe card HTML for a single holding/watchlist entry. */
 function buildCard(h) {
   const d        = liveData[h.yf_symbol];
@@ -2220,9 +2190,6 @@ function buildCard(h) {
       <span>Delete</span>
     </div>`;
 
-  // Today's high / low range row (id for live updates via updateCard)
-  const dayRangeHtml = `<div class="hc-dayrange" id="hcdr-${h.id}">${buildDayRangeInner(d)}</div>`;
-
   let bodyHtml;
   if (isWatch) {
     // Watchlist card: compact, price prominent
@@ -2236,7 +2203,6 @@ function buildCard(h) {
           <span class="hc-name">${h.name || ''}</span>
           <span class="perf-pill info" style="font-size:9px;padding:2px 5px">Watch</span>
         </div>
-        ${dayRangeHtml}
         <div class="hc-perfs-row">
           <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
           ${refBtn}
@@ -2267,7 +2233,6 @@ function buildCard(h) {
           <span class="hc-avg-arr">→</span>
           <span class="hc-cur-price" id="hcpu-${h.id}">${curPriceStr}</span>
         </div>
-        ${dayRangeHtml}
         <div class="hc-perfs-row">
           <div class="hc-perfs" id="hcperf-${h.id}">${pills}</div>
           ${refBtn}
@@ -2396,10 +2361,6 @@ function updateCard(id) {
     perfEl.innerHTML = '<span class="perf-pill na">— no data</span>';
   }
   // If still fetching, leave the "⟳ Fetching…" text as-is
-
-  // Update today's day-range row
-  const drEl = document.getElementById(`hcdr-${id}`);
-  if (drEl) drEl.innerHTML = buildDayRangeInner(d);
 }
 
 function updateSummary() {

@@ -60,18 +60,7 @@ function displaySym(s) { return (s || '').replace(/\.(NS|BO)$/i, ''); }
 const ZERODHA_SUFFIXES = /-(BL|BE|SM|IL|BZ|MT|SZ|RR|IV|E)$/i;
 function stripZerodhaSuffix(sym) { return sym.replace(ZERODHA_SUFFIXES, ''); }
 
-// Today's day high/low inner HTML — mirrors buildDayRangeInner() in index.html
-function buildDayRangeInner(d) {
-  if (!d || d.day_high == null || d.day_low == null) return '';
-  const atHi  = d.price >= d.day_high * 0.997;
-  const atLo  = d.price <= d.day_low  * 1.003;
-  const fmtV  = v => '₹' + v.toLocaleString('en-IN', {maximumFractionDigits:2});
-  const hiTag = atHi ? `<span class="dr-hi">H ${fmtV(d.day_high)}</span>`
-                     : `<span class="dr-lbl">H ${fmtV(d.day_high)}</span>`;
-  const loTag = atLo ? `<span class="dr-lo">L ${fmtV(d.day_low)}</span>`
-                     : `<span class="dr-lbl">L ${fmtV(d.day_low)}</span>`;
-  return `${loTag}<span class="dr-sep">·</span>${hiTag}`;
-}
+
 
 function pctChange(closes, timestamps, daysAgo) {
   if (!closes || !closes.length) return null;
@@ -165,56 +154,6 @@ test('-E only stripped at end',                  'A-EB',      stripZerodhaSuffix
 test('GOLDBEES-E normalizes to GOLDBEES.NS',
   'GOLDBEES.NS',
   normalizeYfSymbol(stripZerodhaSuffix('GOLDBEES-E'), 'NSE'));
-
-// ── buildDayRangeInner ───────────────────────────────────────────────────────
-console.log('\nbuildDayRangeInner');
-// No data → empty string
-test('null data → empty',           '', buildDayRangeInner(null));
-test('missing day_high → empty',    '', buildDayRangeInner({ price:100, day_high:null, day_low:90 }));
-test('missing day_low → empty',     '', buildDayRangeInner({ price:100, day_high:110, day_low:null }));
-
-// Normal range: both lbl spans, no badge classes
-{
-  const html = buildDayRangeInner({ price:100, day_high:110, day_low:90 });
-  test('normal range: H is dr-lbl',   true, html.includes('class="dr-lbl">H'));
-  test('normal range: L is dr-lbl',   true, html.includes('class="dr-lbl">L'));
-  test('normal range: no dr-hi badge',false, html.includes('dr-hi'));
-  test('normal range: no dr-lo badge',false, html.includes('dr-lo'));
-}
-
-// At high (price == day_high → within 0.3%)
-{
-  const html = buildDayRangeInner({ price:110, day_high:110, day_low:90 });
-  test('at day-high: H gets dr-hi badge',  true,  html.includes('class="dr-hi">H'));
-  test('at day-high: L stays dr-lbl',      true,  html.includes('class="dr-lbl">L'));
-}
-
-// At low (price == day_low → within 0.3%)
-{
-  const html = buildDayRangeInner({ price:90, day_high:110, day_low:90 });
-  test('at day-low: L gets dr-lo badge',   true,  html.includes('class="dr-lo">L'));
-  test('at day-low: H stays dr-lbl',       true,  html.includes('class="dr-lbl">H'));
-}
-
-// Near high (within 0.3%)
-{
-  const html = buildDayRangeInner({ price:109.7, day_high:110, day_low:90 });
-  test('near high (0.27% below): dr-hi',   true,  html.includes('class="dr-hi">H'));
-}
-
-// Near low (within 0.3%)
-{
-  const html = buildDayRangeInner({ price:90.25, day_high:110, day_low:90 });
-  test('near low (0.28% above): dr-lo',    true,  html.includes('class="dr-lo">L'));
-}
-
-// Contains H and L value text
-{
-  const html = buildDayRangeInner({ price:100, day_high:1234.56, day_low:987.65 });
-  test('H value in output', true, html.includes('₹1,234.56'));
-  test('L value in output', true, html.includes('₹987.65'));
-  test('separator present', true, html.includes('dr-sep'));
-}
 
 // ── pctChange ────────────────────────────────────────────────────────────────
 console.log('\npctChange');
