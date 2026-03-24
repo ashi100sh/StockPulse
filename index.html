@@ -121,6 +121,10 @@
     .action-btn:active { border-color:var(--accent); color:var(--accent); }
     .action-btn svg { width:13px; height:13px; flex-shrink:0; }
 
+    /* ── Portfolio page tab filter ── */
+    .pf-filter { display:flex; gap:3px; background:var(--bg2);
+                 border-radius:11px; padding:3px; margin:10px 14px 2px; }
+
     /* ── Section header ── */
     .section-header { padding:13px 16px 7px; display:flex; align-items:center;
                       justify-content:space-between; }
@@ -693,6 +697,12 @@
 
       <!-- Cache age banner — shown between action row and holdings list -->
       <div id="cacheBanner" style="display:none"></div>
+
+      <!-- Portfolio / Watchlist tab filter -->
+      <div class="pf-filter">
+        <button class="af-btn pf-tab-btn active" onclick="setPortfolioFilter('portfolio')">Portfolio</button>
+        <button class="af-btn pf-tab-btn" onclick="setPortfolioFilter('watchlist')">Watchlist</button>
+      </div>
 
       <div class="section-header">
         <span class="section-title">Holdings</span>
@@ -1559,11 +1569,18 @@ function clearSym() {
 // ─────────────────────────────────────────────────────────────────────────────
 let addMode = 'portfolio';
 let analyticsFilter = 'portfolio'; // 'portfolio' | 'watchlist'
+let portfolioFilter = 'portfolio'; // 'portfolio' | 'watchlist'
 function setAnalyticsFilter(f) {
   analyticsFilter = f;
-  document.querySelectorAll('.af-btn').forEach((btn, i) =>
+  document.querySelectorAll('.analytics-filter .af-btn').forEach((btn, i) =>
     btn.classList.toggle('active', ['portfolio','watchlist'][i] === f));
   renderAnalytics();
+}
+function setPortfolioFilter(f) {
+  portfolioFilter = f;
+  document.querySelectorAll('.pf-tab-btn').forEach((btn, i) =>
+    btn.classList.toggle('active', ['portfolio','watchlist'][i] === f));
+  renderPortfolio();
 }
 function setAddMode(mode) {
   addMode = mode;
@@ -2273,8 +2290,35 @@ function updateHoldingsSortBar() {
 
 function renderPortfolio() {
   const list = document.getElementById('holdingsList');
+  const isWl = portfolioFilter === 'watchlist';
   const watchlist = portfolio.filter(h => h.watch);
 
+  // Adapt UI chrome for active tab
+  const summaryStrip = document.querySelector('.summary-strip');
+  const sortBar = document.getElementById('holdingsSortBar');
+  const sectionTitle = document.querySelector('.section-title');
+  const swipeHint = document.querySelector('.swipe-hint-txt');
+  if (summaryStrip) summaryStrip.style.display = isWl ? 'none' : '';
+  if (sortBar) sortBar.style.display = isWl ? 'none' : '';
+  if (sectionTitle) sectionTitle.textContent = isWl ? 'Watchlist' : 'Holdings';
+  if (swipeHint) swipeHint.style.display = isWl ? 'none' : '';
+
+  // ── Watchlist tab ──
+  if (isWl) {
+    if (watchlist.length === 0) {
+      list.innerHTML = `<div class="empty-state">
+        <div class="icon">👁</div>
+        <p>No watchlist stocks</p>
+        <small>Tap + and switch to "Watch only" to track stocks without investing</small>
+      </div>`;
+      return;
+    }
+    list.innerHTML = watchlist.map(buildCard).join('');
+    initSwipes();
+    return;
+  }
+
+  // ── Portfolio tab ──
   // Sort portfolio holdings — nulls always sink to bottom (sentinel flips with direction)
   const MISSING = holdingsSortDir > 0 ? Infinity : -Infinity;
   const holdings = portfolio.filter(h => !h.watch).slice().sort((a, b) => {
@@ -2298,7 +2342,7 @@ function renderPortfolio() {
 
   updateHoldingsSortBar();
 
-  if (portfolio.length === 0) {
+  if (holdings.length === 0) {
     list.innerHTML = `<div class="empty-state">
       <div class="icon">📈</div>
       <p>No holdings yet</p>
@@ -2306,24 +2350,14 @@ function renderPortfolio() {
     </div>`;
     ['sumInvested','sumCurrent','sumPL','sumReturn'].forEach((id, i) => {
       const el = document.getElementById(id);
+      if (!el) return;
       el.textContent = i < 3 ? '₹0' : '0%';
       el.className = 'sum-val';
     });
     return;
   }
 
-  let html = holdings.map(buildCard).join('');
-
-  if (watchlist.length > 0) {
-    html += `<div class="wl-divider">
-      <div class="wl-divider-line"></div>
-      <span class="wl-divider-label">Watchlist</span>
-      <div class="wl-divider-line"></div>
-    </div>`;
-    html += watchlist.map(buildCard).join('');
-  }
-
-  list.innerHTML = html;
+  list.innerHTML = holdings.map(buildCard).join('');
   updateSummary();
   initSwipes();
 }
